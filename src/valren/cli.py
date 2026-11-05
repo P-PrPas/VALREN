@@ -16,6 +16,10 @@ from .delivery import deliver, digest_text, init_outbox
 from .llm import LLM, Budget
 from .notion import read_profile
 from .recommend import recommend
+from .tutor import teach
+from .telegram import Telegram
+from dataclasses import replace
+import time
 
 
 def emit(**values):
@@ -46,6 +50,10 @@ def main(argv=None):
     resolution.add_argument("id")
     resolution.add_argument("--state", choices=["sent", "ready", "failed"], required=True)
     resolution.add_argument("--receipt", default="operator-confirmed")
+    tutor = sub.add_parser("tutor", help="user-requested paid lesson, saved to Library")
+    tutor.add_argument("target")
+    poll = sub.add_parser("telegram-poll", help="one authenticated Telegram polling cycle")
+    poll.add_argument("--once", action="store_true", help="deprecated alias: each invocation is one bounded cycle")
     args = parser.parse_args(argv)
     run_id = str(uuid.uuid4())
     try:
@@ -65,6 +73,23 @@ def main(argv=None):
         with nullcontext() if dry else worker_lock(path.with_suffix(".lock")):
             store = Store(":memory:" if dry else path)
             try:
+                if args.command in ("tutor", "telegram-poll"):
+                    def tutor_request(target):
+                        tutor_settings = replace(settings, llm=settings.tutor_llm or settings.llm)
+                        profile = json.dumps(settings.interests, ensure_ascii=False)
+                        if settings.notion_profile_page_id:
+                            profile += "\n" + read_profile(settings)
+                        return teach(tutor_settings, store, LLM(tutor_settings, store), Notion(settings, store), target, profile)
+                    if args.command == "tutor":
+                        emit(run_id=run_id, **tutor_request(args.target))
+                    else:
+                        def handler(text, identifier):
+                            command, _, target = text.partition(" ")
+                            if command == "/tutor" and target.strip():
+                                return tutor_request(target.strip())["lesson"]
+                            return "ใช้ /tutor ตามด้วย canonical ID หรือ https://arxiv.org/abs/ID เพื่อเริ่มบทเรียน"
+                        emit(run_id=run_id, **Telegram(settings, store).poll_once(handler))
+                    return 0
                 if args.command == "health":
                     init_outbox(store)
                     budget = Budget(settings, store)

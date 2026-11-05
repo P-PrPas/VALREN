@@ -203,6 +203,9 @@ class Notion:
             raise
         self.store.set_state(flag, False)
 
+    def save_lesson(self, key, fingerprint, body):
+        self.save_managed(key, "lesson-" + fingerprint, body)
+
 
 def read_profile(settings, http=None):
     page = uuid(settings.notion_profile_page_id)

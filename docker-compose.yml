@@ -1,0 +1,51 @@
+name: valren
+services:
+  worker:
+    build: .
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 192m
+    memswap_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    restart: "no"
+  hermes:
+    image: nousresearch/hermes-agent@sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db
+    profiles: [hermes]
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    environment:
+      HERMES_HOME: /work/.hermes
+      VALREN_HOME: /work
+      PYTHONPATH: /work/src
+      PYTHONDONTWRITEBYTECODE: "1"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./src:/work/src:ro
+      - ./config:/work/config:ro
+      - ./data:/work/data
+      - ./.hermes:/work/.hermes
+      - ./hermes/valren_plugin:/work/.hermes/plugins/valren-research:ro
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    restart: "no"

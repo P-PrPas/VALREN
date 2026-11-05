@@ -54,8 +54,8 @@ def main(argv=None):
                     return 0
                 if args.command == "backup":
                     destination = local_path(args.destination)
-                    if destination == path:
-                        raise ValueError("backup destination must differ from live database")
+                    if destination == path or destination.exists() or str(destination) in (str(path) + "-wal", str(path) + "-shm", str(path.with_suffix(".lock"))):
+                        raise ValueError("backup destination must be a new, separate file")
                     store.backup(destination)
                     emit(run_id=run_id, backed_up=True)
                     return 0
@@ -75,7 +75,7 @@ def main(argv=None):
                 return 0 if report["ok"] else 1
             finally:
                 store.close()
-    except (ValueError, OSError, TypeError, KeyError, sqlite3.Error, RuntimeError, RecursionError) as error:
+    except Exception as error:
         # Do not echo remote payloads or secrets through unhandled tracebacks.
         emit(run_id=run_id, ok=False, error_type=type(error).__name__)
         return 1

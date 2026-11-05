@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from urllib.parse import quote, urlencode
 
 from .http import HTTP, RemoteError
@@ -40,6 +41,7 @@ class Notion:
         self.http = http or HTTP({"api.notion.com"})
 
     def request(self, method, path, payload=None, safe=False):
+        time.sleep(.35)  # Stay below Notion's nominal per-integration request rate.
         data, _ = self.http.json(method, "https://api.notion.com/v1/" + path, payload=payload,
             headers={"Authorization": "Bearer " + self.token, "Notion-Version": self.settings.notion_version},
             retry_safe=safe)
@@ -71,28 +73,46 @@ class Notion:
 
     def sync(self):
         pages = list(self.query())  # Do not mark sync successful on a partial read.
-        keys = set()
+        keys, conflicts = set(), []
+        counts = {}
         for page in pages:
-            props = page["properties"]
-            key = plain(props["Canonical ID"])
-            if not key:
-                continue
-            if key in keys:
-                raise ValueError("duplicate Canonical ID in Library")
-            keys.add(key)
-            item = Candidate(key, plain(props["Title"]), props["Type"]["select"]["name"],
-                             props["Source URL"]["url"], text=plain(props["Summary"]))
-            if not self.store.db.execute("SELECT 1 FROM items WHERE key=?", (key,)).fetchone():
-                self.store.add(item)
-            status = (props["Status"].get("select") or {}).get("name", "New")
-            date = (props.get("Recommended on", {}).get("date") or {}).get("start")
-            feedback = (props.get("Feedback", {}).get("select") or {}).get("name")
-            self.store.db.execute("UPDATE items SET page_id=?,status=?,recommended=?,feedback=? WHERE key=?",
-                                  (page["id"], status, date, feedback, key))
+            try:
+                key = plain(page["properties"]["Canonical ID"])
+                counts[key] = counts.get(key, 0) + 1
+            except (TypeError, KeyError, AttributeError):
+                pass
+        for page in pages:
+            key = ""
+            try:
+                props = page["properties"]
+                key = plain(props["Canonical ID"])
+                if not key or counts[key] > 1:
+                    raise ValueError("duplicate/empty canonical key")
+                item = Candidate(key, plain(props["Title"]), props["Type"]["select"]["name"],
+                                 props["Source URL"]["url"], text=plain(props["Summary"]))
+                status = (props["Status"].get("select") or {}).get("name", "New")
+                if status not in {"New", "Recommended", "Reading", "Deep-dived", "Skipped"}:
+                    raise ValueError("invalid Library status")
+                date = (props.get("Recommended on", {}).get("date") or {}).get("start")
+                feedback = (props.get("Feedback", {}).get("select") or {}).get("name")
+                uuid(page["id"])
+                if not self.store.db.execute("SELECT 1 FROM items WHERE key=?", (key,)).fetchone():
+                    self.store.add(item)
+                self.store.db.execute("UPDATE items SET page_id=?,status=?,recommended=?,feedback=? WHERE key=?",
+                                      (page["id"], status, date, feedback, key))
+                keys.add(key)
+                self.store.set_state("conflict:" + key, False)
+            except (ValueError, TypeError, KeyError, AttributeError):
+                conflicts.append({"key": key, "page_id": page.get("id")})
+                if key:
+                    self.store.set_state("conflict:" + key, True)
+        self.store.set_state("library_conflicts", conflicts)
         self.store.set_state("library_synced", now())
         return len(keys)
 
     def ensure_page(self, item):
+        if self.store.get_state("conflict:" + item.key):
+            raise ValueError("item blocked by Library conflict")
         # Query exact canonical ID even after a previous timeout; never blindly repeat create.
         matches = list(self.query({"property": "Canonical ID", "rich_text": {"equals": item.key}}))
         if len(matches) > 1:
@@ -115,8 +135,13 @@ class Notion:
                     pass  # RSS dates stay in provenance until normalized.
             # Persist before sending, also covering process death after remote acceptance.
             self.store.set_state("create_uncertain:" + item.key, True)
-            page = self.request("POST", "pages", {"parent": {"type": "data_source_id", "data_source_id": self.source},
-                                                       "properties": props})
+            try:
+                page = self.request("POST", "pages", {"parent": {"type": "data_source_id", "data_source_id": self.source},
+                                                           "properties": props})
+            except RemoteError as error:
+                if not error.uncertain:
+                    self.store.set_state("create_uncertain:" + item.key, False)
+                raise
             page_id = page["id"]
         uuid(page_id)
         self.store.db.execute("UPDATE items SET page_id=? WHERE key=?", (page_id, item.key))

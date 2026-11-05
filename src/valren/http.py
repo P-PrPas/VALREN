@@ -3,7 +3,9 @@ import http.client
 import ipaddress
 import json
 import socket
+import signal
 import ssl
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -13,6 +15,10 @@ class RemoteError(RuntimeError):
         super().__init__(f"remote request failed ({status})")
         self.status = status
         self.uncertain = uncertain
+
+
+class FetchDeadline(RuntimeError):
+    pass
 
 
 def public_address(host, port=443):
@@ -44,6 +50,26 @@ class HTTP:
         self.sleep = sleep
 
     def request(self, method, url, *, payload=None, headers=None, retry_safe=False):
+        if threading.current_thread() is not threading.main_thread():
+            raise ValueError("HTTP worker must run on the main POSIX thread for deadlines")
+        old_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+        started = time.monotonic()
+        def expired(*_):
+            raise FetchDeadline()
+        signal.signal(signal.SIGALRM, expired)
+        signal.setitimer(signal.ITIMER_REAL, min(previous_timer[0] or 60, 60))
+        try:
+            return self._request(method, url, payload=payload, headers=headers, retry_safe=retry_safe)
+        except FetchDeadline:
+            raise RemoteError(uncertain=method != "GET" and not retry_safe) from None
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+            if previous_timer[0]:
+                signal.setitimer(signal.ITIMER_REAL, max(.001, previous_timer[0] - (time.monotonic() - started)), previous_timer[1])
+
+    def _request(self, method, url, *, payload=None, headers=None, retry_safe=False):
         parts = urlsplit(url)
         if (parts.scheme != "https" or parts.hostname not in self.allowed_hosts
                 or parts.port not in (None, 443) or parts.username or parts.password or parts.fragment):

@@ -24,9 +24,6 @@ def worker_lock(path):
 
 
 def ingest(settings, store, items, health=None, notion=None):
-    if notion:
-        notion.validate()
-        notion.sync()
     added = 0
     for item in items:
         previous = store.db.execute("SELECT payload FROM items WHERE key=?", (item.key,)).fetchone()
@@ -37,11 +34,21 @@ def ingest(settings, store, items, health=None, notion=None):
         added += store.add(item)
     failures = 0
     if notion:
+        try:
+            notion.validate()
+            notion.sync()
+        except Exception:
+            failures += 1
+            notion = None
+    if notion:
         for item in store.pending(settings.candidate_limit):
             try:
                 notion.ensure_page(item)
-            except Exception:
+            except Exception as error:
                 failures += 1
+                if getattr(error, "status", None) in (401, 403, 429):
+                    break
+        failures += len(store.get_state("library_conflicts", []))
     report = {"fetched": len(items), "added": added, "duplicates": len(items) - added,
               "sources": health or {}, "notion_failures": failures,
               "pending": len(store.pending(settings.candidate_limit)),

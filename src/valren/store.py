@@ -64,8 +64,20 @@ class Store:
             return created
 
     def pending(self, limit=100):
-        return [Candidate(**json.loads(row[0])) for row in self.db.execute(
-            "SELECT payload FROM items WHERE status='New' AND recommended IS NULL ORDER BY discovered DESC,key LIMIT ?", (limit,))]
+        items = []
+        rows = self.db.execute("SELECT key,payload FROM items WHERE status='New' AND recommended IS NULL ORDER BY discovered DESC,key").fetchall()
+        for row in rows:
+            if self.get_state("conflict:" + row[0]):
+                continue
+            try:
+                item = Candidate(**json.loads(row[1]))
+            except (ValueError, TypeError, KeyError, AttributeError):
+                self.set_state("quarantine:" + row[0], True)
+                continue
+            items.append(item)
+            if len(items) >= limit:
+                break
+        return items
 
     def get_state(self, key, default=None):
         row = self.db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()

@@ -8,9 +8,76 @@ from valren.notion import Notion, rich
 from valren.pipeline import ingest
 from valren.sources import parse_arxiv, parse_frontier, Sources
 from valren.store import Store
+from valren.pipeline import worker_lock
+from valren.config import local_path
+from pathlib import Path
+import tempfile
 
 
 class RadarTests(unittest.TestCase):
+    def test_lock_contention(self):
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            path = Path(directory)/"worker.lock"
+            with worker_lock(path):
+                with self.assertRaises(ValueError):
+                    with worker_lock(path):
+                        pass
+
+    def test_http_retry_and_redirect_rejection(self):
+        from unittest.mock import MagicMock
+        response = MagicMock(status=429)
+        response.getheaders.return_value = [("Retry-After", "1")]
+        response.read.return_value = b'{}'
+        success = MagicMock(status=200)
+        success.getheaders.return_value = []
+        success.read.return_value = b'{}'
+        connection = MagicMock()
+        connection.getresponse.side_effect = [response, success]
+        delays = []
+        with patch("valren.http.public_address", return_value="1.1.1.1"), patch("valren.http.PinnedHTTPS", return_value=connection):
+            HTTP({"example.com"}, sleep=delays.append).json("GET", "https://example.com/x")
+        self.assertEqual(delays, [1])
+        response.status = 302
+        connection.getresponse.side_effect = [response]
+        with patch("valren.http.public_address", return_value="1.1.1.1"), patch("valren.http.PinnedHTTPS", return_value=connection):
+            with self.assertRaises(RemoteError):
+                HTTP({"example.com"}).request("GET", "https://example.com/x")
+
+    def test_hf_license_and_bad_record_isolation(self):
+        from unittest.mock import MagicMock
+        http = MagicMock()
+        http.json.return_value = ([{"id": "../.."}, {"id": "gpt2", "cardData": {"license": "mit"}}], {})
+        source = Sources(Settings(sources={"hf_tasks": ["text-generation"]}), http=http)
+        items = source.huggingface()
+        self.assertEqual([item.key for item in items], ["hf:gpt2"])
+        self.assertEqual(items[0].metadata["license"], "mit")
+        self.assertIn("cardData=true", http.json.call_args.args[1])
+        self.assertEqual(source.skipped, 1)
+
+    def test_sync_conflicts_dont_drop_fetched_data(self):
+        from unittest.mock import MagicMock
+        store = Store(":memory:")
+        notion = MagicMock()
+        notion.sync.side_effect = RemoteError(401)
+        item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b")
+        report = ingest(Settings(), store, [item], notion=notion)
+        self.assertFalse(report["ok"])
+        self.assertEqual(len(store.pending()), 1)
+        store.close()
+
+    def test_notion_definite_failure_can_retry(self):
+        store = Store(":memory:")
+        item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b")
+        store.add(item)
+        with patch.dict("os.environ", {"NOTION_LIBRARY_TOKEN": "test"}):
+            client = Notion(Settings(notion_data_source_id="a" * 32), store, http=object())
+        with patch.object(client, "query", side_effect=lambda *_: iter([])), patch.object(client, "request", side_effect=RemoteError(429)):
+            for _ in range(2):
+                with self.assertRaises(RemoteError):
+                    client.ensure_page(item)
+                self.assertFalse(store.get_state("create_uncertain:" + item.key))
+        store.close()
+
     def test_arxiv_version_and_xml_injection(self):
         atom = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2401.12345v2</id><title>AI</title><summary>Abstract</summary></entry></feed>'
         item = list(parse_arxiv(atom))[0]

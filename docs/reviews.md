@@ -9,3 +9,13 @@ Review quota: at most two Claude Lab / Opus 5.5 / medium review threads per PR. 
 - Remaining low-risk follow-up: CI action SHA pinning and avoiding duplicate push/PR CI triggers. Dry-run intentionally previews supplied fixtures, not production state, in this phase.
 - Added regression checks for alias reuse, backup/restore and invalid metadata/config.
 - Round 2 (final): `mcp:c8e3bf52-be41-4dcf-b304-6e7e45c3df31`; medium findings confirmed fixed. Addressed remaining input type/RecursionError sanitization, falsy Notion ID validation, database version downgrade and stale README/evidence. Query-parameter policy and legacy payload quarantine are deferred to their source/sync implementations. No third review requested. PR stays open for owner.
+
+## Persistent reviewer
+
+User requested reuse on 6 Nov 2026. All remaining reviews use thread `mcp:83fe4a3e-d0a6-48d3-9418-ec8d66b1d184` with Claude Lab / Opus 5.5 / medium. Do not create further reviewer threads. Each PR still has at most two rounds.
+
+## PR #2 — Phase 1
+
+- Round 1: same persistent thread. Fixed definite Notion rejection leaving uncertain flags; paced Notion calls and stop on auth/quota failures. Store fetched candidates before sync. Quarantine invalid/duplicate Library rows and block affected keys only. Isolate malformed source records/feeds. Divide GitHub quotas across topics and both newly-created/recently-active searches; divide HF tasks and request cardData with license fallback. Legacy single-name HF IDs accepted safely.
+- Added wall-clock HTTP deadlines including DNS/header/body and a ten-minute collection deadline (main POSIX thread required). Reject non-UTF-8 XML. Backup requires a new path and excludes WAL/SHM/lock files. CLI boundary sanitizes unexpected exceptions. Added regression checks for rate-limit recovery, source records/licenses, retry/redirect, lock contention and retaining fetched data on Notion outage.
+- Live smoke is recorded in validation.md; phase 1 stores metadata/New rows. Thai summaries and managed provenance blocks arrive in phases 2/3.

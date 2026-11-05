@@ -10,6 +10,35 @@ from valren.store import Store
 
 
 class FoundationTests(unittest.TestCase):
+    def test_untrusted_metadata_and_nested_config(self):
+        for settings in [dict(interests={"confirmed": "false"}), dict(monthly_budget_usd=True),
+                         dict(sources={"unknown": []}), dict(sources={"github_topics": "ai"})]:
+            with self.assertRaises(ValueError):
+                Settings(**settings)
+        with self.assertRaises(ValueError):
+            canonical("hf", "../..")
+        with self.assertRaises(ValueError):
+            canonical("frontier", "https://user:secret@example.com/release")
+        self.assertEqual(canonical("frontier", "https://Example.com:443/release/#fragment"),
+                         "frontier:https://example.com/release")
+        with self.assertRaises(ValueError):
+            Candidate("github:1", "wrong", "Paper", "https://github.com/a/b")
+
+    def test_alias_reuse_and_backup(self):
+        store = Store(":memory:")
+        for key in ["github:1", "github:2", "hf:a/b"]:
+            kind = "Repo" if key.startswith("github") else "Open model (LLM)"
+            host = "github.com" if kind == "Repo" else "huggingface.co"
+            store.add(Candidate(key, "a/b", kind, f"https://{host}/a/b", aliases=["a/b"]))
+        self.assertEqual(store.db.execute("SELECT count(*) FROM aliases").fetchone()[0], 3)
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            path = Path(directory)/"backup.sqlite3"
+            store.backup(path)
+            restored = Store(path)
+            self.assertEqual(len(restored.pending()), 3)
+            restored.close()
+        store.close()
+
     def test_canonical_versions_and_rename(self):
         self.assertEqual(canonical("arxiv", "https://arxiv.org/pdf/2401.12345v2.pdf"), "arxiv:2401.12345")
         self.assertEqual(canonical("github", "00123"), "github:123")

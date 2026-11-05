@@ -28,7 +28,7 @@ MVP คือค้นพบข้อมูลทั้งสี่กลุ่�
 
 ## 3. โครงสร้างระบบ
 
-เสนอ Python 3.12+, SQLite จาก standard library, HTTP client และ parser สำหรับ Atom/RSS เท่าที่จำเป็น พร้อม pytest สำหรับ logic สำคัญ ล็อก dependency เมื่อเริ่ม implementation และตรวจ runtime ของ Hermes ก่อนเลือก image จริง
+เสนอ Python 3.12+, SQLite จาก standard library, HTTP client และ parser สำหรับ Atom/RSS เท่าที่จำเป็น พร้อม unittest สำหรับ logic สำคัญ ล็อก dependency เมื่อเริ่ม implementation และตรวจ runtime ของ Hermes ก่อนเลือก image จริง
 
 วงจร Radar: fetch → normalize → deduplicate → filter/rank → summarize/verify → persist Notion → queue digest → deliver
 
@@ -55,8 +55,7 @@ valren/
   pyproject.toml
   src/valren/
   tests/fixtures/
-  config/interest-profile.yaml
-  config/sources.yaml
+  config/settings.toml
   .env.example
   .gitignore
   docker-compose.yml
@@ -87,7 +86,7 @@ Canonical key มี namespace และสร้างด้วยโค้ด:
 - Paper: `arxiv:<base-id>` ตัด version suffix เพื่อไม่แนะนำซ้ำเมื่อ v2 ออก แต่เก็บ version ที่อ่านไว้
 - Repo: `github:<numeric-repository-id>` ใช้ `owner/repo` เป็นชื่อและ alias เพื่อรองรับ rename/transfer
 - Model: `hf:<model-id>` เก็บ ID ตามต้นทางและ alias เมื่อยืนยันการย้าย/เปลี่ยนชื่อ ไม่ lowercase ทุก ID โดยเดา
-- Frontier: `frontier:<publisher>:<stable-release-id>` ต้องมี mapping ที่ตรวจได้ ไม่ใช้ชื่อที่ LLM แต่ง
+- Frontier: `frontier:<normalized-primary-release-url>` ใช้ URL ของ announcement ที่กำหนดจาก feed ของ publisher ใน allowlist; normalize host/port/trailing slash แต่คง query ที่อาจเป็น release ID ไว้ ไม่ใช้ชื่อที่ LLM แต่ง การเปลี่ยน URL ต้อง map alias ที่ยืนยันเอง
 
 Paper, repo และ model ของงานเดียวกันยังเป็นคนละ entity เชื่อมด้วย related IDs; grouping ช่วยไม่ให้ digest วันเดียวกันมีข่าวงานเดียวซ้ำสามรายการ โดยไม่ลบข้อมูลต้นทาง
 

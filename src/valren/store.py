@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -27,10 +27,11 @@ class Store:
                 feedback TEXT, lesson TEXT
             );
             CREATE TABLE IF NOT EXISTS aliases (
-                alias TEXT PRIMARY KEY, key TEXT NOT NULL REFERENCES items(key)
+                alias TEXT NOT NULL, key TEXT NOT NULL REFERENCES items(key), PRIMARY KEY(alias,key)
             );
             CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
+        self.db.execute("PRAGMA user_version=1")
 
     def close(self):
         self.db.close()
@@ -55,10 +56,8 @@ class Store:
             self.db.execute("UPDATE items SET payload=? WHERE key=?",
                             (json.dumps(item.as_dict(), ensure_ascii=False), item.key))
             for alias in item.aliases:
-                existing = self.db.execute("SELECT key FROM aliases WHERE alias=?", (alias,)).fetchone()
-                if existing and existing[0] != item.key:
-                    raise ValueError(f"alias conflict: {alias}")
-                self.db.execute("INSERT OR IGNORE INTO aliases VALUES(?,?)", (alias, item.key))
+                namespaced = item.key.partition(":")[0] + ":name:" + alias
+                self.db.execute("INSERT OR IGNORE INTO aliases VALUES(?,?)", (namespaced, item.key))
             return created
 
     def pending(self, limit=100):
@@ -75,5 +74,5 @@ class Store:
 
     def backup(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(path) as destination:
+        with closing(sqlite3.connect(path)) as destination:
             self.db.backup(destination)

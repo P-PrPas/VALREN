@@ -11,6 +11,10 @@ from valren.store import Store
 
 class FoundationTests(unittest.TestCase):
     def test_untrusted_metadata_and_nested_config(self):
+        with self.assertRaises(ValueError):
+            Candidate(5, "invalid", "Paper", "https://arxiv.org/abs/2401.12345")
+        with self.assertRaises(ValueError):
+            Settings(notion_data_source_id=False)
         for settings in [dict(interests={"confirmed": "false"}), dict(monthly_budget_usd=True),
                          dict(sources={"unknown": []}), dict(sources={"github_topics": "ai"})]:
             with self.assertRaises(ValueError):

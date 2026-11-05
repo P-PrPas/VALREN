@@ -2,7 +2,15 @@
 
 Agent ติดตามเทคโนโลยี AI คัดเลือก GitHub repo, open model (LLM/CV), frontier LLM และ paper พร้อมอธิบายภาษาไทยและบันทึกความรู้ลง Notion
 
-สถานะ: วางแผนพัฒนาแล้ว ยังไม่มี runtime หรือการเชื่อมต่อบริการจริง
+สถานะ: มี CLI foundation และ offline tests แล้ว ยังไม่มีการเชื่อมต่อบริการจริง
+
+รันจาก directory นี้ (หรือตั้ง `VALREN_HOME` เป็น absolute path ของ checkout):
+
+```bash
+PYTHONPATH=src python3 -m valren.cli doctor
+PYTHONPATH=src python3 -m valren.cli radar --dry-run --fixture tests/fixtures/candidates.json
+PYTHONPATH=src python3 -m unittest discover -v
+```
 
 - [ข้อกำหนดต้นทาง](docs/สรุปการออกแบบ%20Agent%20VARLEN%20(AI%20Researcher).md)
 - [แผนพัฒนาและเกณฑ์รับงาน](docs/development-plan.md)

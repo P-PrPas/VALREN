@@ -60,7 +60,7 @@ class Settings:
                 if not valid:
                     raise ValueError(f"invalid {section}.{key}")
         for value in (self.notion_data_source_id, self.notion_profile_page_id):
-            if value and (not isinstance(value, str) or not re.fullmatch(r"[a-fA-F0-9]{32}|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}", value)):
+            if not isinstance(value, str) or (value and not re.fullmatch(r"[a-fA-F0-9]{32}|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}", value)):
                 raise ValueError("invalid Notion ID")
         if not isinstance(self.notion_version, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", self.notion_version):
             raise ValueError("invalid Notion version")

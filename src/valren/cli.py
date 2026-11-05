@@ -47,7 +47,7 @@ def main(argv=None):
         finally:
             store.close()
         return 0
-    except (ValueError, OSError, TypeError, KeyError, sqlite3.Error) as error:
+    except (ValueError, OSError, TypeError, KeyError, sqlite3.Error, RecursionError) as error:
         # Do not echo remote payloads or secrets through unhandled tracebacks.
         emit(run_id=run_id, ok=False, error_type=type(error).__name__)
         return 1

@@ -17,6 +17,9 @@ class Store:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=10, isolation_level=None)
         self.db.row_factory = sqlite3.Row
+        if self.db.execute("PRAGMA user_version").fetchone()[0] > 1:
+            self.db.close()
+            raise ValueError("database created by a newer worker")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""

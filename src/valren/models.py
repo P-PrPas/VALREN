@@ -42,6 +42,8 @@ class Candidate:
     metadata: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        if any(not isinstance(getattr(self, field), str) for field in ("key", "title", "kind", "url", "published", "text")):
+            raise ValueError("candidate text fields must be strings")
         if not isinstance(self.aliases, list) or any(not isinstance(a, str) or len(a) > 500 for a in self.aliases) or not isinstance(self.metadata, dict):
             raise ValueError("invalid aliases/metadata")
         if self.kind not in KINDS or not self.title.strip() or len(self.title) > 1000:

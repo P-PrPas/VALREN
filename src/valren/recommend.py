@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import hashlib
 from zoneinfo import ZoneInfo
 
 from .delivery import digest_text, init_outbox
@@ -16,6 +17,13 @@ def recommend(settings, store, llm, notion, profile):
     init_outbox(store)
     day = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
     job_key = "digest:" + day
+    # Resume saved paid work even if a retry crosses midnight.
+    for prior in store.db.execute("SELECT key,value FROM state WHERE key LIKE 'digest:%' ORDER BY key"):
+        if not store.db.execute("SELECT 1 FROM deliveries WHERE id=?", (prior["key"],)).fetchone():
+            value = json.loads(prior["value"])
+            if isinstance(value, dict) and "entries" in value:
+                job_key, day = prior["key"], prior["key"][7:]
+                break
     existing = store.db.execute("SELECT state FROM deliveries WHERE id=?", (job_key,)).fetchone()
     if existing:
         return {"day": day, "state": existing[0], "resumed": True}
@@ -25,15 +33,11 @@ def recommend(settings, store, llm, notion, profile):
     if work is None:
         candidates = store.pending(settings.candidate_limit)
         excluded = [term.casefold() for term in settings.interests.get("excluded", [])]
-        candidates = [item for item in candidates if not any(term in (item.title + " " + item.text).casefold() for term in excluded)]
-        budget_exhausted = False
-        try:
-            ranked = rank(llm, candidates, profile)
-        except BudgetExceeded:
-            ranked, budget_exhausted = [], True
+        candidates = [item for item in candidates if len(item.text.strip()) >= 10 and not any(term in (item.title + " " + item.text).casefold() for term in excluded)]
+        ranking = rank(llm, candidates, profile)
         selected, groups = [], set()
         by_key = {item.key: item for item in candidates}
-        for row in ranked:
+        for row in ranking["items"]:
             if row["score"] < 3 or len(selected) >= settings.daily_limit:
                 continue
             item = by_key[row["key"]]
@@ -42,7 +46,7 @@ def recommend(settings, store, llm, notion, profile):
                 continue
             groups.add(group)
             selected.append({"item": item.as_dict(), "score": row["score"]})
-        work = {"entries": selected, "budget_exhausted": budget_exhausted}
+        work = {"entries": selected, "budget_exhausted": ranking["budget_exhausted"], "failed_batches": ranking["failed_batches"]}
         store.set_state(job_key, work)
     from .models import Candidate
     entries = []
@@ -51,6 +55,8 @@ def recommend(settings, store, llm, notion, profile):
         current = store.db.execute("SELECT status FROM items WHERE key=?", (item.key,)).fetchone()
         if current and current[0] in ("Skipped", "Reading", "Deep-dived"):
             continue
+        if row.get("summary_failed"):
+            continue
         if "summary" not in row:
             try:
                 row["summary"] = summary(llm, item, profile)
@@ -58,9 +64,17 @@ def recommend(settings, store, llm, notion, profile):
                 work["budget_exhausted"] = True
                 store.set_state(job_key, work)
                 break
+            except Exception as error:
+                row["summary_failed"] = type(error).__name__
+                store.set_state(job_key, work)
+                continue
             store.set_state(job_key, work)  # Retry reuses paid work.
         result = row["summary"]
         notion.ensure_page(item)
+        provenance = json.dumps({"source_id": item.key, "source_url": item.url, "coverage": item.metadata.get("coverage", "unknown"),
+            "observed_at": store.db.execute("SELECT discovered FROM items WHERE key=?", (item.key,)).fetchone()[0],
+            "result": result}, ensure_ascii=False)
+        notion.save_managed(item.key, "summary-" + hashlib.sha256(provenance.encode()).hexdigest()[:24], provenance)
         notion.patch_owned(item.key, {
             "Status": {"select": {"name": "Recommended"}}, "Recommended on": {"date": {"start": day}},
             "Relevance": {"number": row["score"]}, "Summary": {"rich_text": rich(result["summary"] + "\n" + result["limitations"] +
@@ -74,4 +88,6 @@ def recommend(settings, store, llm, notion, profile):
     content = digest_text(day, entries, warning or work.get("budget_exhausted", False))
     store.db.execute("INSERT INTO deliveries(id,day,payload,state,updated) VALUES(?,?,?,'ready',?)",
         (job_key, day, json.dumps({"content": content, "entries": entries}, ensure_ascii=False), now()))
-    return {"day": day, "state": "ready", "selected": len(entries), "budget_warning": warning}
+    return {"day": day, "state": "ready", "selected": len(entries), "budget_warning": warning,
+            "failed_rank_batches": work.get("failed_batches", 0),
+            "failed_summaries": sum(bool(row.get("summary_failed")) for row in work["entries"])}

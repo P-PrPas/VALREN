@@ -43,15 +43,16 @@ class PinnedHTTPS(http.client.HTTPSConnection):
 
 
 class HTTP:
-    def __init__(self, allowed_hosts, timeout=20, max_bytes=2_000_000, sleep=time.sleep):
+    def __init__(self, allowed_hosts, timeout=20, max_bytes=2_000_000, sleep=time.sleep, wall_timeout=60):
         self.allowed_hosts = set(allowed_hosts)
         self.timeout = timeout
         self.max_bytes = max_bytes
         self.sleep = sleep
         self.deadline = None
+        self.wall_timeout = wall_timeout
 
     def request(self, method, url, *, payload=None, headers=None, retry_safe=False):
-        remaining = self.deadline - time.monotonic() if self.deadline else 60
+        remaining = self.deadline - time.monotonic() if self.deadline else self.wall_timeout
         if remaining <= 0:
             raise RemoteError()
         if threading.current_thread() is not threading.main_thread():
@@ -62,7 +63,7 @@ class HTTP:
         def expired(*_):
             raise FetchDeadline()
         signal.signal(signal.SIGALRM, expired)
-        signal.setitimer(signal.ITIMER_REAL, min(previous_timer[0] or 60, 60, remaining))
+        signal.setitimer(signal.ITIMER_REAL, min(previous_timer[0] or self.wall_timeout, self.wall_timeout, remaining))
         try:
             return self._request(method, url, payload=payload, headers=headers, retry_safe=retry_safe)
         except FetchDeadline:

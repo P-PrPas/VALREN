@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 import re
@@ -23,7 +23,7 @@ def init_outbox(store):
 
 
 def safe_display(value):
-    return str(value).replace("@", "＠").replace("`", "'").replace("<", "‹").replace(">", "›")
+    return re.sub(r"https?://\S+", "[link removed]", str(value)).replace("@", "＠").replace("`", "'").replace("<", "‹").replace(">", "›")
 
 
 def digest_text(day, entries, budget_warning=False):
@@ -56,9 +56,16 @@ def deliver(settings, store, http=None, at=None):
             or parts.query or parts.fragment or not re.fullmatch(r"/api/webhooks/\d+/[A-Za-z0-9_.-]+", parts.path)):
         raise ValueError("valid dedicated Discord webhook required")
     client = http or HTTP({"discord.com"})
+    local_day = (at or datetime.now(ZoneInfo(settings.timezone))).astimezone(ZoneInfo(settings.timezone)).date()
+    store.db.execute("UPDATE deliveries SET state='expired' WHERE state='ready' AND day<?", ((local_day - timedelta(days=1)).isoformat(),))
     sent = 0
-    rows = store.db.execute("SELECT * FROM deliveries WHERE state='ready' AND attempts<3 ORDER BY day").fetchall()
+    rows = store.db.execute("SELECT * FROM deliveries WHERE state='ready' AND attempts<3 ORDER BY day LIMIT 1").fetchall()
     for row in rows:
+        day_key = "discord-day:" + local_day.isoformat()
+        previous = store.get_state(day_key)
+        if previous and previous != row["id"]:
+            return {"sent": 0, "deferred": "daily-limit"}
+        store.set_state(day_key, row["id"])
         # After process death, sending remains uncertain; never automatically duplicate it.
         store.db.execute("UPDATE deliveries SET state='uncertain',attempts=attempts+1,updated=? WHERE id=?", (now(), row["id"]))
         try:

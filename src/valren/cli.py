@@ -87,7 +87,7 @@ def main(argv=None):
                     return 0
                 if args.command == "resolve-delivery":
                     init_outbox(store)
-                    changed = store.db.execute("UPDATE deliveries SET state=?,receipt=? WHERE id=? AND state='uncertain'",
+                    changed = store.db.execute("UPDATE deliveries SET state=?,receipt=?,attempts=0 WHERE id=? AND state='uncertain'",
                                                (args.state, args.receipt, args.id)).rowcount
                     if not changed:
                         raise ValueError("delivery is not uncertain")

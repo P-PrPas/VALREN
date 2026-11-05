@@ -161,6 +161,48 @@ class Notion:
             raise ValueError("page outside Research Library")
         self.request("PATCH", "pages/" + uuid(row[0]), {"properties": properties})
 
+    def save_managed(self, key, identifier, body):
+        """Append one complete, marked document; reconcile before repeating an uncertain append."""
+        row = self.store.db.execute("SELECT page_id FROM items WHERE key=?", (key,)).fetchone()
+        if not row or not row[0] or not re.fullmatch(r"[a-z0-9-]{1,80}", identifier):
+            raise ValueError("managed document needs a known Library page and stable identifier")
+        page_id = uuid(row[0])
+        page = self.request("GET", "pages/" + page_id)
+        if page.get("parent", {}).get("data_source_id", "").replace("-", "") != self.source.replace("-", ""):
+            raise ValueError("managed document outside Library")
+        parts = [body[start:start + 1700] for start in range(0, len(body), 1700)]
+        if not parts or len(parts) > 90:
+            raise ValueError("managed document length invalid")
+        texts = [f"VARLEN {identifier} [{i + 1}/{len(parts)}]\n{part}" for i, part in enumerate(parts)]
+        found, cursor = [], None
+        for _ in range(100):
+            suffix = "?page_size=100" + ("&start_cursor=" + quote(cursor, safe="") if cursor else "")
+            data = self.request("GET", f"blocks/{page_id}/children" + suffix)
+            found.extend(plain({"type": "rich_text", "rich_text": block.get(block["type"], {}).get("rich_text", [])}) for block in data["results"])
+            if not data.get("has_more"):
+                break
+            if not data.get("next_cursor") or data["next_cursor"] == cursor:
+                raise ValueError("invalid block pagination")
+            cursor = data["next_cursor"]
+        else:
+            raise ValueError("managed document scan limit")
+        matches = [text in found for text in texts]
+        flag = "append-uncertain:" + key + ":" + identifier
+        if all(matches):
+            self.store.set_state(flag, False)
+            return
+        if any(matches) or self.store.get_state(flag):
+            raise ValueError("partial/uncertain managed document needs operator reconciliation")
+        children = [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": rich(text)}} for text in texts]
+        self.store.set_state(flag, True)
+        try:
+            self.request("PATCH", f"blocks/{page_id}/children", {"children": children})
+        except RemoteError as error:
+            if not error.uncertain:
+                self.store.set_state(flag, False)
+            raise
+        self.store.set_state(flag, False)
+
 
 def read_profile(settings, http=None):
     page = uuid(settings.notion_profile_page_id)

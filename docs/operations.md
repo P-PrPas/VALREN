@@ -40,6 +40,10 @@ Set the top-level monthly_budget_usd before calling. Use a Chat Completions comp
 
 Rank in batches of five (at most candidate_limit); summarize only selected items. A saved daily job reuses generated summaries across failures. Evidence quotes must be exact substrings of fetched source text; this verifies citation shape, not scientific truth or entailment, so Verification stays Unverified. Abstract/metadata coverage must be disclosed. No automatic benchmark reproduction.
 
+Each paid request is fingerprinted and durably claimed before network I/O. The raw response is cached before parsing; identical malformed output is never purchased again automatically. Ambiguous/inflight requests remain held for operator reconciliation. A definite rejection releases its reservation. Ranking keeps partial results when budget is exhausted; malformed summaries are skipped once rather than blocking the whole digest. Unfinished daily work is resumed across midnight. Metadata-only observations do not use fabricated source quotes.
+
+Discord sends at most one digest per local day. Ready digests older than yesterday expire; an ambiguous send occupies its daily slot until reconciled. Source URLs are the only displayed links. Managed provenance is appended as marked paragraphs; partial/uncertain appends require inspection rather than overwriting user notes.
+
 ## Recovery
 
 - `sync-library`: rebuild Library history before paid ranking. Bad/duplicate rows are listed in health, quarantined by key and do not destroy fetched candidates. Correct or remove those rows then sync again.

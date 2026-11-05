@@ -7,7 +7,6 @@ from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from .http import HTTP, RemoteError
-from .delivery import safe_display
 from .llm import checked_text, BudgetExceeded
 from .models import Candidate, canonical
 from .sources import parse_arxiv
@@ -35,7 +34,9 @@ class ArticleText(HTMLParser):
 def resolve_target(target, store, http=None):
     row = store.db.execute("SELECT payload FROM items WHERE key=?", (target,)).fetchone()
     if row:
-        return Candidate(**json.loads(row[0]))
+        cached = Candidate(**json.loads(row[0]))
+        if cached.kind != "Paper" or cached.metadata.get("coverage") == "abstract":
+            return cached
     parts = urlsplit(target)
     if parts.scheme == "https" and parts.hostname == "arxiv.org" and not parts.username and not parts.query:
         key = canonical("arxiv", target)
@@ -92,7 +93,7 @@ def render_lesson(item, lesson, coverage):
     sections.append("เชื่อมกับงานของคุณ\n" + lesson["application"])
     sections.append("แหล่งอ้างอิง")
     sections.extend('Evidence: "' + row["quote"] + '"' for row in lesson["evidence"])
-    return safe_display("\n\n".join(sections)) + "\n" + item.url
+    return re.sub(r"https?://\S+", "[link removed]", "\n\n".join(sections)) + "\n" + item.url
 
 
 def teach(settings, store, llm, notion, target, profile, http=None, retry_invalid=False):
@@ -109,6 +110,12 @@ def teach(settings, store, llm, notion, target, profile, http=None, retry_invali
     fingerprint = hashlib.sha256((week + ":" + item.key).encode()).hexdigest()[:24]
     job_key, week_key = "lesson:" + fingerprint, "tutor-week:" + week
     saved = store.get_state(job_key)
+    if saved is None:
+        for row in store.db.execute("SELECT key,value FROM state WHERE key LIKE 'lesson:%' ORDER BY key"):
+            prior = json.loads(row["value"])
+            if prior.get("item", {}).get("key") == item.key and not prior.get("persisted"):
+                job_key, fingerprint, saved = row["key"], row["key"][7:], prior
+                break
     if saved is None:
         chunks, coverage = source_chunks(item, http)
         if not chunks or not chunks[0].strip():
@@ -149,7 +156,7 @@ def teach(settings, store, llm, notion, target, profile, http=None, retry_invali
                 record = {"notes": notes["notes"], "evidence": notes["evidence"][:1]}
             except BudgetExceeded:
                 raise
-            except (ValueError, KeyError, TypeError, IndexError) as error:
+            except (ValueError, KeyError, TypeError, IndexError, RemoteError) as error:
                 record = {"failed": type(error).__name__}
             if index < len(saved["notes"]):
                 saved["notes"][index] = record
@@ -181,7 +188,7 @@ def teach(settings, store, llm, notion, target, profile, http=None, retry_invali
             validate_evidence(lesson["evidence"], item, allowed_quotes)
         except BudgetExceeded:
             raise
-        except (ValueError, KeyError, TypeError, IndexError):
+        except (ValueError, KeyError, TypeError, IndexError, RemoteError):
             invalid_terminal()
             raise ValueError("lesson validation failed; weekly slot released; explicit retry-invalid available once") from None
         saved["lesson"] = lesson

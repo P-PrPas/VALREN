@@ -23,7 +23,7 @@ def library_search(args, **kwargs):
         return json.dumps({"error_type": type(error).__name__})
 
 
-def tutor_command(raw_args, *, platform="", source=None, **kwargs):
+def tutor_command(raw_args, *, platform="", source=None, retry_invalid=False, **kwargs):
     try:
         from valren.config import load, ROOT
         from valren.telegram import authorized
@@ -37,7 +37,8 @@ def tutor_command(raw_args, *, platform="", source=None, **kwargs):
         environment = {key: value for key, value in os.environ.items()
                        if key in {"LLM_API_KEY", "NOTION_LIBRARY_TOKEN", "NOTION_PROFILE_TOKEN", "VALREN_HOME", "PYTHONPATH", "PATH"}}
         environment["VALREN_HOME"] = str(ROOT)
-        completed = subprocess.run([sys.executable, "-m", "valren.cli", "tutor", "--", raw_args.strip()],
+        command = [sys.executable, "-m", "valren.cli", "tutor"] + (["--retry-invalid"] if retry_invalid else []) + ["--", raw_args.strip()]
+        completed = subprocess.run(command,
             cwd=ROOT, env=environment, capture_output=True, text=True, timeout=1800, check=False)
         result = json.loads(completed.stdout)
         return result.get("lesson", "คำขอยังไม่สำเร็จ: " + result.get("error_type", "WorkerError"))
@@ -52,3 +53,7 @@ def register(ctx):
         handler=library_search)
     ctx.register_command("valren_tutor", handler=tutor_command,
                          description="Teach an existing research key or arXiv paper; authenticated user command only")
+    def retry(raw_args, **kwargs):
+        return tutor_command(raw_args, retry_invalid=True, **kwargs)
+    ctx.register_command("valren_tutor_retry", handler=retry,
+                         description="Explicitly authorize one fresh paid attempt after invalid/uncertain Tutor output")

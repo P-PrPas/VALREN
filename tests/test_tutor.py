@@ -86,6 +86,18 @@ class TutorTests(unittest.TestCase):
             teach(self.settings, self.store, llm, MagicMock(), item.key, "AI")
         llm.complete.assert_not_called()
 
+    def test_uncertain_notes_release_week_without_automatic_rebilling(self):
+        item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b", text="actual source", metadata={"coverage": "description"})
+        self.store.add(item)
+        llm = MagicMock()
+        llm.complete.side_effect = RemoteError(uncertain=True)
+        with self.assertRaises(ValueError):
+            teach(self.settings, self.store, llm, MagicMock(), item.key, "AI")
+        with self.assertRaises(ValueError):
+            teach(self.settings, self.store, llm, MagicMock(), item.key, "AI")
+        self.assertEqual(llm.complete.call_count, 1)
+        self.assertTrue(all(json.loads(row[0]) is None for row in self.store.db.execute("SELECT value FROM state WHERE key LIKE 'tutor-week:%'")))
+
     def test_lesson_reuses_paid_work_and_marks_status_after_persist(self):
         item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b", text="actual source", metadata={"coverage": "description"})
         self.store.add(item)

@@ -1,0 +1,4 @@
+[
+  {"key":"arxiv:2401.12345","title":"Example agent paper (fixture)","kind":"Paper","url":"https://arxiv.org/abs/2401.12345","published":"2026-11-01T00:00:00Z","text":"A synthetic fixture about AI agents, not a real paper summary."},
+  {"key":"github:123","title":"example/research","kind":"Repo","url":"https://github.com/example/research","aliases":["example/research"],"text":"Synthetic LLM research repository."}
+]

@@ -42,6 +42,8 @@ Rank in batches of five (at most candidate_limit); summarize only selected items
 
 Each paid request is fingerprinted and durably claimed before network I/O. The raw response is cached before parsing; identical malformed output is never purchased again automatically. Ambiguous/inflight requests remain held for operator reconciliation. A definite rejection releases its reservation. Ranking keeps partial results when budget is exhausted; malformed summaries are skipped once rather than blocking the whole digest. Unfinished daily work is resumed across midnight. Metadata-only observations do not use fabricated source quotes.
 
+Here, cached raw response means decoded HTTP JSON before model-content parsing. Non-JSON HTTP responses remain uncertain and are not automatically repurchased. Cache pruning is intentionally manual until retention can preserve idempotency tombstones. Resumed work consumes today's digest slot/date; per-item Notion failures are recorded and omitted so they cannot pin all future runs.
+
 Discord sends at most one digest per local day. Ready digests older than yesterday expire; an ambiguous send occupies its daily slot until reconciled. Source URLs are the only displayed links. Managed provenance is appended as marked paragraphs; partial/uncertain appends require inspection rather than overwriting user notes.
 
 ## Recovery

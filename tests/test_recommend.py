@@ -93,6 +93,23 @@ class RecommendationTests(unittest.TestCase):
         payload = json.loads(self.store.db.execute("SELECT payload FROM deliveries").fetchone()[0])
         self.assertEqual(payload["entries"][0]["tags"], ["AI  agents"])
 
+    def test_stale_notion_failure_does_not_block_future_digest(self):
+        item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b", text="actual source")
+        self.store.add(item)
+        self.store.set_state("digest:2020-01-01", {"entries": [{"item": item.as_dict(), "score": 5,
+            "summary": {"summary": "สรุป", "why": "เกี่ยวข้อง", "limitations": "metadata", "tags": [], "evidence": []}}]})
+        notion = MagicMock()
+        notion.ensure_page.side_effect = ValueError("operator gate")
+        llm = MagicMock()
+        llm.budget.used.return_value = 0
+        result = recommend(paid_settings(), self.store, llm, notion, "AI")
+        self.assertEqual(result["failed_notion_items"], 1)
+        self.assertNotEqual(result["day"], "2020-01-01")
+        row = self.store.db.execute("SELECT day,state FROM deliveries").fetchone()
+        self.assertEqual(row["day"], result["day"])
+        self.assertEqual(row["state"], "ready")
+        llm.complete.assert_not_called()
+
     def test_successful_delivery_records_receipt(self):
         init_outbox(self.store)
         self.store.db.execute("INSERT INTO deliveries(id,day,payload,state,updated) VALUES(?,?,?,'ready',?)",

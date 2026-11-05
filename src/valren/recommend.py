@@ -17,12 +17,15 @@ def recommend(settings, store, llm, notion, profile):
     init_outbox(store)
     day = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
     job_key = "digest:" + day
+    current_delivery = store.db.execute("SELECT id,state FROM deliveries WHERE day=? LIMIT 1", (day,)).fetchone()
+    if current_delivery:
+        return {"day": day, "state": current_delivery["state"], "resumed": True}
     # Resume saved paid work even if a retry crosses midnight.
     for prior in store.db.execute("SELECT key,value FROM state WHERE key LIKE 'digest:%' ORDER BY key"):
         if not store.db.execute("SELECT 1 FROM deliveries WHERE id=?", (prior["key"],)).fetchone():
             value = json.loads(prior["value"])
             if isinstance(value, dict) and "entries" in value:
-                job_key, day = prior["key"], prior["key"][7:]
+                job_key = prior["key"]  # Paid work keeps its identity; delivery belongs to today.
                 break
     existing = store.db.execute("SELECT state FROM deliveries WHERE id=?", (job_key,)).fetchone()
     if existing:
@@ -55,7 +58,7 @@ def recommend(settings, store, llm, notion, profile):
         current = store.db.execute("SELECT status FROM items WHERE key=?", (item.key,)).fetchone()
         if current and current[0] in ("Skipped", "Reading", "Deep-dived"):
             continue
-        if row.get("summary_failed"):
+        if row.get("summary_failed") or row.get("notion_failed"):
             continue
         if "summary" not in row:
             try:
@@ -70,18 +73,23 @@ def recommend(settings, store, llm, notion, profile):
                 continue
             store.set_state(job_key, work)  # Retry reuses paid work.
         result = row["summary"]
-        notion.ensure_page(item)
         provenance = json.dumps({"source_id": item.key, "source_url": item.url, "coverage": item.metadata.get("coverage", "unknown"),
             "observed_at": store.db.execute("SELECT discovered FROM items WHERE key=?", (item.key,)).fetchone()[0],
             "result": result}, ensure_ascii=False)
-        notion.save_managed(item.key, "summary-" + hashlib.sha256(provenance.encode()).hexdigest()[:24], provenance)
-        notion.patch_owned(item.key, {
-            "Status": {"select": {"name": "Recommended"}}, "Recommended on": {"date": {"start": day}},
-            "Relevance": {"number": row["score"]}, "Summary": {"rich_text": rich(result["summary"] + "\n" + result["limitations"] +
-                "\nSource: " + item.url + "\nEvidence: " + "; ".join(c["quote"] for c in result["evidence"]))},
-            "Why it matters to me": {"rich_text": rich(result["why"])},
-            "Tags": {"multi_select": [{"name": tag} for tag in result["tags"]]},
-            "Verification status": {"select": {"name": "Unverified"}}})
+        try:
+            notion.ensure_page(item)
+            notion.save_managed(item.key, "summary-" + hashlib.sha256(provenance.encode()).hexdigest()[:24], provenance)
+            notion.patch_owned(item.key, {
+                "Status": {"select": {"name": "Recommended"}}, "Recommended on": {"date": {"start": day}},
+                "Relevance": {"number": row["score"]}, "Summary": {"rich_text": rich(result["summary"] + "\n" + result["limitations"] +
+                    "\nSource: " + item.url + "\nEvidence: " + "; ".join(c["quote"] for c in result["evidence"]))},
+                "Why it matters to me": {"rich_text": rich(result["why"])},
+                "Tags": {"multi_select": [{"name": tag} for tag in result["tags"]]},
+                "Verification status": {"select": {"name": "Unverified"}}})
+        except Exception as error:
+            row["notion_failed"] = type(error).__name__
+            store.set_state(job_key, work)
+            continue
         store.db.execute("UPDATE items SET status='Recommended',recommended=coalesce(recommended,?) WHERE key=?", (day, item.key))
         entries.append({"key": item.key, "title": item.title, "url": item.url, **result})
     warning = llm.budget.used() >= micros(settings.monthly_budget_usd) * .8
@@ -90,4 +98,5 @@ def recommend(settings, store, llm, notion, profile):
         (job_key, day, json.dumps({"content": content, "entries": entries}, ensure_ascii=False), now()))
     return {"day": day, "state": "ready", "selected": len(entries), "budget_warning": warning,
             "failed_rank_batches": work.get("failed_batches", 0),
+            "failed_notion_items": sum(bool(row.get("notion_failed")) for row in work["entries"]),
             "failed_summaries": sum(bool(row.get("summary_failed")) for row in work["entries"])}

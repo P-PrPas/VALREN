@@ -71,6 +71,7 @@ def main(argv=None):
                     emit(run_id=run_id, last_run=store.get_state("last_run"), last_success=store.get_state("last_success"),
                          library_conflicts=store.get_state("library_conflicts", []), budget_used_micros=budget.used(),
                          budget_blocked=bool(store.get_state("budget_blocked")),
+                         llm_calls_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'llm-call:%' AND value LIKE '%\"inflight\"%'").fetchone()[0],
                          deliveries=[dict(row) for row in store.db.execute("SELECT id,state,attempts,updated FROM deliveries")])
                     return 0
                 if args.command == "recommend":

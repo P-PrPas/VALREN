@@ -52,6 +52,7 @@ def main(argv=None):
     resolution.add_argument("--receipt", default="operator-confirmed")
     tutor = sub.add_parser("tutor", help="user-requested paid lesson, saved to Library")
     tutor.add_argument("target")
+    tutor.add_argument("--retry-invalid", action="store_true", help="explicitly allow one fresh paid attempt for invalid output")
     poll = sub.add_parser("telegram-poll", help="one authenticated Telegram polling cycle")
     poll.add_argument("--once", action="store_true", help="deprecated alias: each invocation is one bounded cycle")
     args = parser.parse_args(argv)
@@ -74,19 +75,19 @@ def main(argv=None):
             store = Store(":memory:" if dry else path)
             try:
                 if args.command in ("tutor", "telegram-poll"):
-                    def tutor_request(target):
+                    def tutor_request(target, retry_invalid=False):
                         tutor_settings = replace(settings, llm=settings.tutor_llm or settings.llm)
                         profile = json.dumps(settings.interests, ensure_ascii=False)
                         if settings.notion_profile_page_id:
                             profile += "\n" + read_profile(settings)
-                        return teach(tutor_settings, store, LLM(tutor_settings, store), Notion(settings, store), target, profile)
+                        return teach(tutor_settings, store, LLM(tutor_settings, store), Notion(settings, store), target, profile, retry_invalid=retry_invalid)
                     if args.command == "tutor":
-                        emit(run_id=run_id, **tutor_request(args.target))
+                        emit(run_id=run_id, **tutor_request(args.target, args.retry_invalid))
                     else:
                         def handler(text, identifier):
                             command, _, target = text.partition(" ")
-                            if command == "/tutor" and target.strip():
-                                return tutor_request(target.strip())["lesson"]
+                            if command in ("/tutor", "/tutor_retry") and target.strip():
+                                return tutor_request(target.strip(), command == "/tutor_retry")["lesson"]
                             return "ใช้ /tutor ตามด้วย canonical ID หรือ https://arxiv.org/abs/ID เพื่อเริ่มบทเรียน"
                         emit(run_id=run_id, **Telegram(settings, store).poll_once(handler))
                     return 0
@@ -97,6 +98,7 @@ def main(argv=None):
                          library_conflicts=store.get_state("library_conflicts", []), budget_used_micros=budget.used(),
                          budget_blocked=bool(store.get_state("budget_blocked")),
                          llm_calls_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'llm-call:%' AND value LIKE '%\"inflight\"%'").fetchone()[0],
+                         telegram_commands_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'telegram-command:%' AND value LIKE '%\"uncertain\"%'").fetchone()[0],
                          deliveries=[dict(row) for row in store.db.execute("SELECT id,state,attempts,updated FROM deliveries")])
                     return 0
                 if args.command == "recommend":

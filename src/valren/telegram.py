@@ -23,7 +23,7 @@ class Telegram:
         if not settings.telegram.get("user_ids") or not settings.telegram.get("chat_ids"):
             raise ValueError("Telegram user and chat allowlists required")
         self.base = "https://api.telegram.org/bot" + token + "/"
-        self.http = http or HTTP({"api.telegram.org"})
+        self.http = http or HTTP({"api.telegram.org"}, timeout=35, wall_timeout=45)
 
     def request(self, method, payload):
         data, _ = self.http.json("POST", self.base + method, payload=payload, retry_safe=method == "getUpdates")
@@ -73,7 +73,7 @@ class Telegram:
             if reply.get("state") == "ready":
                 self.send(row["key"].split(":", 1)[1], reply["chat"], reply["body"])
         offset = self.store.get_state("telegram_offset", 0)
-        updates = self.request("getUpdates", {"offset": offset, "timeout": 20, "limit": 10, "allowed_updates": ["message"]})
+        updates = self.request("getUpdates", {"offset": offset, "timeout": 25, "limit": 10, "allowed_updates": ["message"]})
         handled = 0
         for update in updates:
             identifier = update["update_id"]

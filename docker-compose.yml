@@ -38,13 +38,14 @@ services:
       PYTHONPATH: /work/src
       PYTHONDONTWRITEBYTECODE: "1"
     env_file:
-      - path: .env
+      - path: .env.hermes
         required: false
     volumes:
       - ./src:/work/src:ro
       - ./config:/work/config:ro
       - ./data:/work/data
       - ./.hermes:/work/.hermes
+      - ./hermes/config.yaml:/work/.hermes/config.yaml:ro
       - ./hermes/valren_plugin:/work/.hermes/plugins/valren-research:ro
     tmpfs:
       - /tmp:size=64m,mode=1777

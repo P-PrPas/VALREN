@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.hermes.example
 .hermes/
 data/
 .venv/

@@ -146,16 +146,11 @@ class Sources:
         return items
 
     def collect(self):
-        previous = signal.getsignal(signal.SIGALRM)
-        def expired(*_):
-            raise FetchDeadline()
-        signal.signal(signal.SIGALRM, expired)
-        signal.setitimer(signal.ITIMER_REAL, 600)
+        self.http.deadline = time.monotonic() + 600
         try:
             return self._collect()
         finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous)
+            self.http.deadline = None
 
     def _collect(self):
         items, health = [], {}

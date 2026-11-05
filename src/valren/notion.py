@@ -81,6 +81,7 @@ class Notion:
                 counts[key] = counts.get(key, 0) + 1
             except (TypeError, KeyError, AttributeError):
                 pass
+        self.store.db.execute("UPDATE state SET value='false' WHERE key LIKE 'conflict:%'")
         for page in pages:
             key = ""
             try:

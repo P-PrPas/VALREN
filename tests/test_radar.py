@@ -101,7 +101,8 @@ class RadarTests(unittest.TestCase):
 
     def test_partial_sources_and_rerun(self):
         settings = Settings()
-        sources = Sources(settings, http=object(), sleep=lambda _: None)
+        from unittest.mock import MagicMock
+        sources = Sources(settings, http=MagicMock(), sleep=lambda _: None)
         with patch.object(sources, "arxiv", side_effect=RemoteError(503)):
             items, health = sources.collect()
         self.assertFalse(health["arxiv"]["ok"])
@@ -109,6 +110,16 @@ class RadarTests(unittest.TestCase):
         item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b")
         self.assertEqual(ingest(settings, store, [item])["added"], 1)
         self.assertEqual(ingest(settings, store, [item])["duplicates"], 1)
+        store.close()
+
+    def test_removed_conflicts_can_recover(self):
+        store = Store(":memory:")
+        store.set_state("conflict:github:1", True)
+        with patch.dict("os.environ", {"NOTION_LIBRARY_TOKEN": "test"}):
+            client = Notion(Settings(notion_data_source_id="a" * 32), store, http=object())
+        with patch.object(client, "query", return_value=iter([])):
+            client.sync()
+        self.assertFalse(store.get_state("conflict:github:1"))
         store.close()
 
     def test_notion_create_timeout_is_not_blindly_retried(self):

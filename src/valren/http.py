@@ -48,8 +48,12 @@ class HTTP:
         self.timeout = timeout
         self.max_bytes = max_bytes
         self.sleep = sleep
+        self.deadline = None
 
     def request(self, method, url, *, payload=None, headers=None, retry_safe=False):
+        remaining = self.deadline - time.monotonic() if self.deadline else 60
+        if remaining <= 0:
+            raise RemoteError()
         if threading.current_thread() is not threading.main_thread():
             raise ValueError("HTTP worker must run on the main POSIX thread for deadlines")
         old_handler = signal.getsignal(signal.SIGALRM)
@@ -58,7 +62,7 @@ class HTTP:
         def expired(*_):
             raise FetchDeadline()
         signal.signal(signal.SIGALRM, expired)
-        signal.setitimer(signal.ITIMER_REAL, min(previous_timer[0] or 60, 60))
+        signal.setitimer(signal.ITIMER_REAL, min(previous_timer[0] or 60, 60, remaining))
         try:
             return self._request(method, url, payload=payload, headers=headers, retry_safe=retry_safe)
         except FetchDeadline:

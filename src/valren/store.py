@@ -65,7 +65,7 @@ class Store:
 
     def pending(self, limit=100):
         return [Candidate(**json.loads(row[0])) for row in self.db.execute(
-            "SELECT payload FROM items WHERE status='New' ORDER BY discovered DESC,key LIMIT ?", (limit,))]
+            "SELECT payload FROM items WHERE status='New' AND recommended IS NULL ORDER BY discovered DESC,key LIMIT ?", (limit,))]
 
     def get_state(self, key, default=None):
         row = self.db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()

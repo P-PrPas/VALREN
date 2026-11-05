@@ -20,6 +20,9 @@ from .tutor import teach
 from .telegram import Telegram
 from dataclasses import replace
 import time
+from .feedback import record_feedback, feedback_buttons, button_feedback, taste
+from .agent_net import receive, approve, run_approved, init_requests
+from .scheduler import serve
 
 
 def emit(**values):
@@ -55,10 +58,34 @@ def main(argv=None):
     tutor.add_argument("--retry-invalid", action="store_true", help="explicitly allow one fresh paid attempt for invalid output")
     poll = sub.add_parser("telegram-poll", help="one authenticated Telegram polling cycle")
     poll.add_argument("--once", action="store_true", help="deprecated alias: each invocation is one bounded cycle")
+    sub.add_parser("telegram-serve", help="run the standalone bot loop; never alongside Hermes on the same token")
+    feedback = sub.add_parser("feedback", help="trusted local user feedback")
+    feedback.add_argument("key")
+    feedback.add_argument("value", choices=["Liked", "Disliked"])
+    agent = sub.add_parser("agent-request", help="receive one signed agent request envelope")
+    agent.add_argument("envelope", type=Path)
+    approval = sub.add_parser("approve-request", help="trusted local operator approval, not an agent tool")
+    approval.add_argument("id")
+    run = sub.add_parser("run-approved", help="consume one current user approval and run its fixed target")
+    run.add_argument("id")
+    sub.add_parser("requests")
+    schedule = sub.add_parser("schedule", help="local daily scheduler; starts no T3 task")
+    schedule.add_argument("--once", action="store_true")
+    schedule.add_argument("--enable-paid", action="store_true")
+    schedule.add_argument("--enable-delivery", action="store_true")
+    schedule.add_argument("--sync-notion", action="store_true")
     args = parser.parse_args(argv)
     run_id = str(uuid.uuid4())
     try:
         settings = load(args.config)
+        if args.command == "schedule":
+            return serve(settings, args.db, args.config, once=args.once, paid=args.enable_paid,
+                         sending=args.enable_delivery, sync=args.sync_notion)
+        if args.command == "telegram-serve":
+            command = ["--db", args.db] + (["--config", str(args.config)] if args.config else []) + ["telegram-poll"]
+            while True:
+                main(command)
+                time.sleep(30)
         if args.command == "preview-digest":
             entries = json.loads(local_path(str(args.fixture)).read_text())
             emit(run_id=run_id, content=digest_text("preview", entries), dry_run=True)
@@ -74,7 +101,7 @@ def main(argv=None):
         with nullcontext() if dry else worker_lock(path.with_suffix(".lock")):
             store = Store(":memory:" if dry else path)
             try:
-                if args.command in ("tutor", "telegram-poll"):
+                if args.command in ("tutor", "telegram-poll", "run-approved"):
                     def tutor_request(target, retry_invalid=False):
                         tutor_settings = replace(settings, llm=settings.tutor_llm or settings.llm)
                         profile = json.dumps(settings.interests, ensure_ascii=False)
@@ -83,22 +110,51 @@ def main(argv=None):
                         return teach(tutor_settings, store, LLM(tutor_settings, store), Notion(settings, store), target, profile, retry_invalid=retry_invalid)
                     if args.command == "tutor":
                         emit(run_id=run_id, **tutor_request(args.target, args.retry_invalid))
+                    elif args.command == "run-approved":
+                        emit(run_id=run_id, **run_approved(store, args.id, tutor_request))
                     else:
-                        def handler(text, identifier):
+                        def handler(text, identifier, message):
                             command, _, target = text.partition(" ")
                             if command in ("/tutor", "/tutor_retry") and target.strip():
                                 return tutor_request(target.strip(), command == "/tutor_retry")["lesson"]
+                            if command in ("/like", "/dislike"):
+                                return record_feedback(store, Notion(settings, store), target.strip(), "Liked" if command == "/like" else "Disliked")
+                            if command == "/feedback":
+                                return feedback_buttons(store, target.strip(), message["chat"]["id"])
+                            if command == "/approve":
+                                approve(store, target.strip(), "telegram:" + str(message["from"]["id"]))
+                                return run_approved(store, target.strip(), tutor_request)["lesson"]
                             return "ใช้ /tutor ตามด้วย canonical ID หรือ https://arxiv.org/abs/ID เพื่อเริ่มบทเรียน"
-                        emit(run_id=run_id, **Telegram(settings, store).poll_once(handler))
+                        emit(run_id=run_id, **Telegram(settings, store).poll_once(handler,
+                            lambda query: button_feedback(store, Notion(settings, store), query)))
+                    return 0
+                if args.command == "feedback":
+                    emit(run_id=run_id, result=record_feedback(store, Notion(settings, store), args.key, args.value))
+                    return 0
+                if args.command == "agent-request":
+                    path = local_path(str(args.envelope))
+                    if path.stat().st_size > 16000:
+                        raise ValueError("agent envelope too large")
+                    emit(run_id=run_id, **receive(settings, store, json.loads(path.read_text())))
+                    return 0
+                if args.command == "approve-request":
+                    emit(run_id=run_id, **approve(store, args.id, "local-operator"))
+                    return 0
+                if args.command == "requests":
+                    init_requests(store)
+                    emit(run_id=run_id, requests=[dict(row) for row in store.db.execute(
+                        "SELECT id,agent,operation,target,state,expires FROM requests ORDER BY created DESC LIMIT 50")])
                     return 0
                 if args.command == "health":
                     init_outbox(store)
                     budget = Budget(settings, store)
+                    init_requests(store)
                     emit(run_id=run_id, last_run=store.get_state("last_run"), last_success=store.get_state("last_success"),
                          library_conflicts=store.get_state("library_conflicts", []), budget_used_micros=budget.used(),
                          budget_blocked=bool(store.get_state("budget_blocked")),
                          llm_calls_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'llm-call:%' AND value LIKE '%\"inflight\"%'").fetchone()[0],
                          telegram_commands_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'telegram-command:%' AND value LIKE '%\"uncertain\"%'").fetchone()[0],
+                         taste=taste(store), pending_requests=store.db.execute("SELECT count(*) FROM requests WHERE state='pending'").fetchone()[0],
                          deliveries=[dict(row) for row in store.db.execute("SELECT id,state,attempts,updated FROM deliveries")])
                     return 0
                 if args.command == "recommend":

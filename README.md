@@ -2,7 +2,7 @@
 
 Agent ติดตามเทคโนโลยี AI คัดเลือก GitHub repo, open model (LLM/CV), frontier LLM และ paper พร้อมอธิบายภาษาไทยและบันทึกความรู้ลง Notion
 
-สถานะ: มี CLI foundation และ offline tests แล้ว ยังไม่มีการเชื่อมต่อบริการจริง
+สถานะ: โค้ดครบวงจร Radar → Notion → LLM/digest → Tutor → feedback/agent requests พร้อม offline tests และ PR แยกเฟส ยังไม่เปิดบริการจริง
 
 รันจาก directory นี้ (หรือตั้ง `VALREN_HOME` เป็น absolute path ของ checkout):
 
@@ -15,6 +15,11 @@ PYTHONPATH=src python3 -m unittest discover -v
 - [ข้อกำหนดต้นทาง](docs/สรุปการออกแบบ%20Agent%20VARLEN%20(AI%20Researcher).md)
 - [แผนพัฒนาและเกณฑ์รับงาน](docs/development-plan.md)
 - [แบบร่าง Interest Profile](docs/interest-profile.template.md)
+- [วิธีรันและกู้คืน](docs/operations.md)
+- [Hermes/Tutor และเงื่อนไข deploy](docs/hermes-integration.md)
+- [Feedback, agent requests และ scheduler](docs/agent-requests.md)
+- [ผลตรวจจริงและรายการที่ยังต้องทดสอบ](docs/validation.md)
+- [บันทึก review แต่ละ PR](docs/reviews.md)
 
 ใช้ `valren` เป็นชื่อ directory และ Python package; คงชื่อ persona `VARLEN` ตามเอกสารต้นทางจนกว่าจะตัดสินเรื่องชื่อ
 

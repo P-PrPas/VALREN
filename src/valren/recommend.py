@@ -7,6 +7,7 @@ from .delivery import digest_text, init_outbox
 from .llm import BudgetExceeded, micros, rank, summary
 from .notion import rich
 from .store import now
+from .feedback import apply_taste
 
 
 def recommend(settings, store, llm, notion, profile):
@@ -38,6 +39,7 @@ def recommend(settings, store, llm, notion, profile):
         excluded = [term.casefold() for term in settings.interests.get("excluded", [])]
         candidates = [item for item in candidates if len(item.text.strip()) >= 10 and not any(term in (item.title + " " + item.text).casefold() for term in excluded)]
         ranking = rank(llm, candidates, profile)
+        ranking["items"] = apply_taste(store, candidates, ranking["items"])
         selected, groups = [], set()
         by_key = {item.key: item for item in candidates}
         for row in ranking["items"]:
@@ -91,6 +93,7 @@ def recommend(settings, store, llm, notion, profile):
             store.set_state(job_key, work)
             continue
         store.db.execute("UPDATE items SET status='Recommended',recommended=coalesce(recommended,?) WHERE key=?", (day, item.key))
+        store.set_state("tags:" + item.key, result["tags"])
         entries.append({"key": item.key, "title": item.title, "url": item.url, **result})
     warning = llm.budget.used() >= micros(settings.monthly_budget_usd) * .8
     content = digest_text(day, entries, warning or work.get("budget_exhausted", False))

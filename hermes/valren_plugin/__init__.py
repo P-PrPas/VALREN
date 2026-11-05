@@ -17,8 +17,10 @@ def library_search(args, **kwargs):
         # Read-only connection: no Store initialization, schema changes, writes or paid calls.
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
             rows = db.execute("SELECT key,payload,status FROM items WHERE instr(lower(payload),lower(?))>0 LIMIT 10", (query,)).fetchall()
+            memory = db.execute("SELECT value FROM state WHERE key='taste_memory'").fetchone()
         return json.dumps({"results": [{"key": row[0], "title": json.loads(row[1])["title"],
-            "url": json.loads(row[1])["url"], "status": row[2]} for row in rows]}, ensure_ascii=False)
+            "url": json.loads(row[1])["url"], "status": row[2]} for row in rows],
+            "taste_memory": json.loads(memory[0]) if memory else ""}, ensure_ascii=False)
     except Exception as error:
         return json.dumps({"error_type": type(error).__name__})
 

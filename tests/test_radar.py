@@ -43,6 +43,24 @@ class RadarTests(unittest.TestCase):
             with self.assertRaises(RemoteError):
                 HTTP({"example.com"}).request("GET", "https://example.com/x")
 
+    def test_partial_github_query_preserves_results(self):
+        from unittest.mock import MagicMock
+        http = MagicMock()
+        http.json.side_effect = [({"incomplete_results": True, "items": [{"id": 1,
+            "full_name": "a/b", "html_url": "https://github.com/a/b", "stargazers_count": 2}]}, {}), RemoteError(503)]
+        source = Sources(Settings(sources={"github_topics": ["ai"]}), http=http, sleep=lambda _: None)
+        with patch.object(source, "arxiv", return_value=[]), patch.object(source, "huggingface", return_value=[]):
+            items, health = source.collect()
+        self.assertEqual([item.key for item in items], ["github:1"])
+        self.assertEqual(health["github"]["failed_queries"], 2)
+        self.assertFalse(health["github"]["ok"])
+
+    def test_utf8_feed_encoding_alias(self):
+        for encoding in ("UTF-8", "utf8"):
+            self.assertEqual(list(parse_frontier(('<?xml version="1.0" encoding="' + encoding + '"?><rss><channel/></rss>').encode(), "https://lab.example/rss")), [])
+        with self.assertRaises(ValueError):
+            list(parse_frontier(b'<?xml version="1.0" encoding="utf-16"?><rss/>', "https://lab.example/rss"))
+
     def test_hf_license_and_bad_record_isolation(self):
         from unittest.mock import MagicMock
         http = MagicMock()
@@ -52,6 +70,7 @@ class RadarTests(unittest.TestCase):
         self.assertEqual([item.key for item in items], ["hf:gpt2"])
         self.assertEqual(items[0].metadata["license"], "mit")
         self.assertIn("cardData=true", http.json.call_args.args[1])
+        self.assertNotIn("full=", http.json.call_args.args[1])
         self.assertEqual(source.skipped, 1)
 
     def test_sync_conflicts_dont_drop_fetched_data(self):

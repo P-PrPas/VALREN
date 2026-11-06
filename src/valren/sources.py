@@ -5,7 +5,7 @@ import signal
 from urllib.parse import urlencode, urlsplit
 import xml.etree.ElementTree as ET
 
-from .http import HTTP, FetchDeadline
+from .http import HTTP, FetchDeadline, RemoteError
 from .models import Candidate, canonical
 
 
@@ -14,7 +14,7 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 
 def xml_entries(data):
     decoded = data.decode("utf-8-sig")
-    if "\x00" in decoded or re.search(r'encoding=[\'\"](?!utf-8)[^\'\"]+', decoded, re.I):
+    if "\x00" in decoded or re.search(r'encoding=[\'\"](?!utf-?8[\'\"])[^\'\"]+', decoded, re.I):
         raise ValueError("feed must use UTF-8")
     if "<!DOCTYPE" in decoded.upper() or "<!ENTITY" in decoded.upper():
         raise ValueError("XML declarations are not allowed")
@@ -63,6 +63,7 @@ class Sources:
         self.sleep = sleep
         self.skipped = 0
         self.feed_failures = 0
+        self.query_failures = 0
 
     def skip(self):
         self.skipped += 1
@@ -97,9 +98,14 @@ class Sources:
                 url = "https://api.github.com/search/repositories?" + urlencode({
                     "q": f"topic:{topic} {mode}:>={since} archived:false is:public", "sort": "stars",
                     "per_page": min(quota, 100), "page": 1})
-                data, _ = self.http.json("GET", url)
+                try:
+                    data, _ = self.http.json("GET", url)
+                except RemoteError:
+                    self.query_failures += 1
+                    self.sleep(7)
+                    continue
                 if data.get("incomplete_results"):
-                    raise ValueError("GitHub search incomplete; narrow topics")
+                    self.query_failures += 1  # Keep returned records and continue other queries.
                 for row in data["items"]:
                     try:
                         items.append(Candidate(canonical("github", str(row["id"])), row["full_name"], "Repo",
@@ -118,8 +124,12 @@ class Sources:
         quota = max(1, self.settings.candidate_limit // max(1, len(tasks)))
         for task in tasks:
             url = "https://huggingface.co/api/models?" + urlencode({"pipeline_tag": task,
-                "sort": "createdAt", "direction": -1, "limit": min(100, quota), "full": "true", "cardData": "true"})
-            data, _ = self.http.json("GET", url)
+                "sort": "createdAt", "direction": -1, "limit": min(100, quota), "cardData": "true"})
+            try:
+                data, _ = self.http.json("GET", url)
+            except RemoteError:
+                self.query_failures += 1
+                continue
             for row in data:
                 try:
                     identifier = row.get("id") or row["modelId"]
@@ -160,11 +170,16 @@ class Sources:
                 health[name] = {"ok": False, "error_type": "RunDeadline"}
                 continue
             self.skipped = 0
+            self.query_failures = 0
+            self.feed_failures = 0
             try:
                 batch = getattr(self, name)()
                 health[name] = {"ok": True, "fetched": len(batch),
                                 "clipped": len(batch) > self.settings.candidate_limit,
                                 "skipped": self.skipped}
+                if name in ("github", "huggingface"):
+                    health[name]["failed_queries"] = self.query_failures
+                    health[name]["ok"] = not self.query_failures
                 if name == "frontier":
                     health[name]["configured_feeds"] = len(self.settings.sources.get("frontier_feeds", []))
                     health[name]["failed_feeds"] = self.feed_failures

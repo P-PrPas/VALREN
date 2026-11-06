@@ -18,4 +18,4 @@ arxiv_categories = ["cs.AI", "cs.LG", "cs.CV", "cs.CL"]
 github_topics = ["llm", "computer-vision", "ai-agents"]
 hf_tasks = ["text-generation", "image-classification"]
 # Explicitly configured primary-source RSS/Atom feeds, not arbitrary web search.
-frontier_feeds = []
+frontier_feeds = ["https://openai.com/news/rss.xml"]

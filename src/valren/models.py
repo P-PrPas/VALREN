@@ -1,6 +1,6 @@
 from dataclasses import asdict, dataclass, field
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 
 KINDS = {"Repo", "Open model (LLM)", "Open model (CV)", "Frontier LLM", "Paper"}
@@ -24,7 +24,13 @@ def canonical(source: str, identifier: str) -> str:
         parts = urlsplit(value)
         if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.port not in (None, 443):
             raise ValueError("frontier release ID must be its primary HTTPS URL")
-        value = parts._replace(netloc=parts.hostname.lower(), path=parts.path.rstrip("/"), fragment="").geturl()
+        # Publisher release URLs need no query: drop known trackers, reject other
+        # parameters rather than persist credentials or collapse functional IDs.
+        tracking = {"gclid", "fbclid", "msclkid", "mc_cid", "mc_eid"}
+        if any(not (name.lower().startswith("utm_") or name.lower() in tracking)
+               for name, _ in parse_qsl(parts.query, keep_blank_values=True, max_num_fields=50)):
+            raise ValueError("frontier URL query requires an explicit publisher policy")
+        value = parts._replace(query="", netloc=parts.hostname.lower(), path=parts.path.rstrip("/"), fragment="").geturl()
     else:
         raise ValueError("unknown source")
     return f"{source}:{value}"
@@ -60,6 +66,8 @@ class Candidate:
             raise ValueError("candidate source/type/host mismatch")
         if source == "frontier" and (self.kind != "Frontier LLM" or canonical(source, self.url) != self.key):
             raise ValueError("frontier key/type mismatch")
+        if source == "frontier":
+            self.url = self.key[len("frontier:"):]
         self.text = self.text[:20000]
 
     def as_dict(self):

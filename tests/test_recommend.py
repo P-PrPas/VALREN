@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from valren.config import Settings
 from valren.delivery import deliver, digest_text, init_outbox, quiet
 from valren.http import RemoteError
-from valren.llm import Budget, BudgetExceeded, LLM, summary, rank
+from valren.llm import Budget, BudgetExceeded, LLM, summary, rank, prune_cache
 from valren.models import Candidate
 from valren.recommend import recommend
 from valren.store import Store, now
@@ -100,6 +100,33 @@ class RecommendationTests(unittest.TestCase):
                 llm.complete("Return JSON.", {}, "test")
         self.assertEqual(http.json.call_count, 1)
         self.assertEqual(llm.budget.used(), 40)
+
+    def test_pruning_retains_billing_tombstones_and_unknown_usage(self):
+        from datetime import timedelta
+        http = MagicMock()
+        http.json.return_value = ({"usage": {"prompt_tokens": 20, "completion_tokens": 10},
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"ok":true}'}}]}, {})
+        with patch.dict("os.environ", {"LLM_API_KEY": "test"}):
+            llm = LLM(paid_settings(), self.store, http)
+        self.assertEqual(llm.complete("Return JSON.", {}, "test"), {"ok": True})
+        row = self.store.db.execute("SELECT key,value FROM state WHERE key LIKE 'llm-call:%'").fetchone()
+        saved = json.loads(row["value"])
+        saved["completed_at"] = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+        self.store.set_state(row["key"], saved)
+        self.store.set_state("llm-call:held", {"state": "inflight", "reservation": "unknown"})
+        self.assertEqual(prune_cache(self.store), 1)
+        self.assertNotIn("response", self.store.get_state(row["key"]))
+        with self.assertRaises(ValueError):
+            llm.complete("Return JSON.", {}, "test")
+        self.assertEqual(http.json.call_count, 1)
+        self.assertEqual(llm.budget.used(), 40)
+        self.assertEqual(self.store.get_state("llm-call:held")["state"], "inflight")
+        legacy = {"state": "done", "reservation": "unknown", "response": {"secret": "body"}}
+        self.store.set_state("llm-call:legacy", legacy)
+        self.assertEqual(prune_cache(self.store), 0)
+        self.assertIn("response", self.store.get_state("llm-call:legacy"))
+        with self.assertRaises(ValueError):
+            prune_cache(self.store, 0)
 
     def test_rank_keeps_partial_results_on_budget_exhaustion(self):
         items = [Candidate(f"github:{i}", f"a/repo{i}", "Repo", f"https://github.com/a/repo{i}", text="actual source") for i in range(1, 7)]

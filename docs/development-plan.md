@@ -86,7 +86,7 @@ Canonical key มี namespace และสร้างด้วยโค้ด:
 - Paper: `arxiv:<base-id>` ตัด version suffix เพื่อไม่แนะนำซ้ำเมื่อ v2 ออก แต่เก็บ version ที่อ่านไว้
 - Repo: `github:<numeric-repository-id>` ใช้ `owner/repo` เป็นชื่อและ alias เพื่อรองรับ rename/transfer
 - Model: `hf:<model-id>` เก็บ ID ตามต้นทางและ alias เมื่อยืนยันการย้าย/เปลี่ยนชื่อ ไม่ lowercase ทุก ID โดยเดา
-- Frontier: `frontier:<normalized-primary-release-url>` ใช้ URL ของ announcement ที่กำหนดจาก feed ของ publisher ใน allowlist; normalize host/port/trailing slash แต่คง query ที่อาจเป็น release ID ไว้ ไม่ใช้ชื่อที่ LLM แต่ง การเปลี่ยน URL ต้อง map alias ที่ยืนยันเอง
+- Frontier: `frontier:<normalized-primary-release-url>` ใช้ URL ของ announcement ที่กำหนดจาก feed ของ publisher ใน allowlist; normalize host/port/trailing slash ลบ query tracking ที่รู้จัก และปฏิเสธ query อื่นจนกว่าจะมี policy ของ publisher เพื่อไม่บันทึก secret หรือรวม release ID คนละตัว ไม่ใช้ชื่อที่ LLM แต่ง การเปลี่ยน URL ต้อง map alias ที่ยืนยันเอง
 
 Paper, repo และ model ของงานเดียวกันยังเป็นคนละ entity เชื่อมด้วย related IDs; grouping ช่วยไม่ให้ digest วันเดียวกันมีข่าวงานเดียวซ้ำสามรายการ โดยไม่ลบข้อมูลต้นทาง
 

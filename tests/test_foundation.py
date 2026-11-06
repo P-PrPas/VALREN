@@ -28,6 +28,15 @@ class FoundationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Candidate("github:1", "wrong", "Paper", "https://github.com/a/b")
 
+    def test_frontier_queries_do_not_leak_or_duplicate(self):
+        url = "https://lab.example/release?utm_source=mail&fbclid=tracker#section"
+        key = canonical("frontier", url)
+        self.assertEqual(key, "frontier:https://lab.example/release")
+        self.assertEqual(Candidate(key, "Release", "Frontier LLM", url).url, key[9:])
+        for query in ("token=secret", "%61pi_key=secret", "id=42", "unknown=", "Token=secret&utm_source=x"):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                canonical("frontier", "https://lab.example/release?" + query)
+
     def test_alias_reuse_and_backup(self):
         store = Store(":memory:")
         for key in ["github:1", "github:2", "hf:a/b"]:

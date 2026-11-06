@@ -29,16 +29,30 @@ def library_search(args, **kwargs):
         return json.dumps({"error_type": type(error).__name__})
 
 
-def tutor_command(raw_args, *, platform="", source=None, retry_invalid=False, **kwargs):
+def authenticated_settings():
+    from valren.config import load
+    from valren.telegram import authorized
     try:
-        from valren.config import load, ROOT
-        from valren.telegram import authorized
-        settings = load()
-        if platform != "telegram" or source is None:
-            raise ValueError("Tutor command requires an authenticated Telegram session")
-        message = {"from": {"id": int(source.user_id)}, "chat": {"id": int(source.chat_id)}}
-        if not authorized(settings, message):
-            raise ValueError("unauthorized Tutor caller")
+        from gateway import session_context
+    except ImportError:
+        raise ValueError("pinned Hermes session context required") from None
+    # Pinned runtime dispatches only raw_args. Read task-local bindings directly:
+    # get_session_env has an environment fallback that cannot prove a live caller.
+    platform = session_context._SESSION_PLATFORM.get()
+    user = session_context._SESSION_USER_ID.get()
+    chat = session_context._SESSION_CHAT_ID.get()
+    if platform != "telegram" or not isinstance(user, str) or not isinstance(chat, str):
+        raise ValueError("authenticated Telegram context required")
+    settings = load()
+    if not authorized(settings, {"from": {"id": int(user)}, "chat": {"id": int(chat)}}):
+        raise ValueError("unauthorized command caller")
+    return settings
+
+
+def tutor_command(raw_args, *, retry_invalid=False, **kwargs):
+    try:
+        from valren.config import ROOT
+        authenticated_settings()
         # Fixed argv, no shell. The subprocess runs HTTP on its main thread with normal worker locks/budget.
         environment = {key: value for key, value in os.environ.items()
                        if key in {"LLM_API_KEY", "NOTION_LIBRARY_TOKEN", "NOTION_PROFILE_TOKEN", "VALREN_HOME", "PYTHONPATH", "PATH"}}
@@ -57,11 +71,11 @@ def register(ctx):
         "name": "valren_library_search", "description": "Search existing research Library cache; read-only, no research or paid calls.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}},
         handler=library_search)
-    ctx.register_command("valren_tutor", handler=tutor_command,
+    ctx.register_command("valren-tutor", handler=tutor_command,
                          description="Teach an existing research key or arXiv paper; authenticated user command only")
     def retry(raw_args, **kwargs):
         return tutor_command(raw_args, retry_invalid=True, **kwargs)
-    ctx.register_command("valren_tutor_retry", handler=retry,
+    ctx.register_command("valren-tutor-retry", handler=retry,
                          description="Explicitly authorize one fresh paid attempt after invalid/uncertain Tutor output")
     ctx.register_command("valren_requests", handler=lambda raw_args, **kwargs: library_search({"query": " "}),
                          description="Read pending research targets and IDs; no approval or paid work")

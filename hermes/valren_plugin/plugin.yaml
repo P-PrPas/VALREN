@@ -1,0 +1,6 @@
+name: valren-research
+version: 0.1.0
+description: Read-only Library search and authenticated user Tutor command for VARLEN
+author: P-PrPas
+provides_tools:
+  - valren_library_search

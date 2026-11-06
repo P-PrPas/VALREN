@@ -1,0 +1,31 @@
+# Restricted profile for the pinned Hermes image. Provider selection remains an operator deployment gate.
+platform_toolsets:
+  cli: [valren]
+  telegram: [valren]
+  discord: []
+  slack: []
+  api: []
+mcp_servers: {}
+tools:
+  tool_search:
+    enabled: "off"
+agent:
+  disabled_toolsets:
+    - terminal
+    - file
+    - browser
+    - web
+    - search
+    - code_execution
+    - delegation
+    - cronjob
+    - memory
+    - skills
+    - messaging
+    - discord
+    - discord_admin
+    - image_gen
+    - tts
+    - vision
+plugins:
+  enabled: [valren-research]

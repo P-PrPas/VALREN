@@ -23,6 +23,7 @@ class Settings:
     interests: dict = field(default_factory=dict)
     sources: dict = field(default_factory=dict)
     llm: dict = field(default_factory=dict)
+    tutor_llm: dict = field(default_factory=dict)
     telegram: dict = field(default_factory=dict)
     agent_net: dict = field(default_factory=dict)
 
@@ -44,6 +45,7 @@ class Settings:
             "telegram": {"user_ids": list, "chat_ids": list},
             "agent_net": {"enabled": bool, "allowed_agents": list},
         }
+        sections["tutor_llm"] = sections["llm"]
         for section, fields in sections.items():
             values = getattr(self, section)
             if not isinstance(values, dict) or set(values) - set(fields):

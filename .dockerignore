@@ -1,0 +1,6 @@
+**
+!src/
+!src/**
+!config/
+!config/**
+!Dockerfile

@@ -17,8 +17,14 @@ def library_search(args, **kwargs):
         # Read-only connection: no Store initialization, schema changes, writes or paid calls.
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
             rows = db.execute("SELECT key,payload,status FROM items WHERE instr(lower(payload),lower(?))>0 LIMIT 10", (query,)).fetchall()
+            memory = db.execute("SELECT value FROM state WHERE key='taste_memory'").fetchone()
+            pending = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='requests'").fetchone():
+                pending = [{"id": row[0], "agent": row[1], "target": row[2], "state": row[3], "expires": row[4]}
+                    for row in db.execute("SELECT id,agent,target,state,expires FROM requests WHERE state IN ('pending','failed','executing') ORDER BY created DESC LIMIT 10")]
         return json.dumps({"results": [{"key": row[0], "title": json.loads(row[1])["title"],
-            "url": json.loads(row[1])["url"], "status": row[2]} for row in rows]}, ensure_ascii=False)
+            "url": json.loads(row[1])["url"], "status": row[2]} for row in rows],
+            "taste_memory": json.loads(memory[0]) if memory else "", "pending_requests": pending}, ensure_ascii=False)
     except Exception as error:
         return json.dumps({"error_type": type(error).__name__})
 
@@ -45,16 +51,32 @@ def authenticated_settings():
 
 def tutor_command(raw_args, *, retry_invalid=False, **kwargs):
     try:
-        from valren.config import ROOT
         authenticated_settings()
-        # Fixed argv, no shell. The subprocess runs HTTP on its main thread with normal worker locks/budget.
-        environment = {key: value for key, value in os.environ.items()
-                       if key in {"LLM_API_KEY", "NOTION_LIBRARY_TOKEN", "NOTION_PROFILE_TOKEN", "VALREN_HOME", "PYTHONPATH", "PATH"}}
-        environment["VALREN_HOME"] = str(ROOT)
-        command = [sys.executable, "-m", "valren.cli", "tutor"] + (["--retry-invalid"] if retry_invalid else []) + ["--", raw_args.strip()]
-        completed = subprocess.run(command,
-            cwd=ROOT, env=environment, capture_output=True, text=True, timeout=1800, check=False)
-        result = json.loads(completed.stdout)
+        result = run_worker(["tutor"] + (["--retry-invalid"] if retry_invalid else []) + ["--", raw_args.strip()])
+        return result.get("lesson", "คำขอยังไม่สำเร็จ: " + result.get("error_type", "WorkerError"))
+    except Exception as error:
+        return "คำขอยังไม่สำเร็จ: " + type(error).__name__
+
+
+def run_worker(arguments):
+    from valren.config import ROOT
+    # Fixed argv and a narrow environment; no shell or arbitrary worker commands.
+    environment = {key: value for key, value in os.environ.items()
+                   if key in {"LLM_API_KEY", "NOTION_LIBRARY_TOKEN", "NOTION_PROFILE_TOKEN", "VALREN_HOME", "PYTHONPATH", "PATH"}}
+    environment["VALREN_HOME"] = str(ROOT)
+    completed = subprocess.run([sys.executable, "-m", "valren.cli", *arguments],
+        cwd=ROOT, env=environment, capture_output=True, text=True, timeout=1800, check=False)
+    return json.loads(completed.stdout)
+
+
+def approve_command(raw_args, **kwargs):
+    try:
+        authenticated_settings()
+        identifier, target = raw_args.strip().split(maxsplit=1)
+        result = run_worker(["approve-request", "--", identifier, target])
+        if result.get("state") != "approved":
+            return "คำขอยังไม่สำเร็จ: " + result.get("error_type", "WorkerError")
+        result = run_worker(["run-approved", "--", identifier])
         return result.get("lesson", "คำขอยังไม่สำเร็จ: " + result.get("error_type", "WorkerError"))
     except Exception as error:
         return "คำขอยังไม่สำเร็จ: " + type(error).__name__
@@ -71,3 +93,13 @@ def register(ctx):
         return tutor_command(raw_args, retry_invalid=True, **kwargs)
     ctx.register_command("valren-tutor-retry", handler=retry,
                          description="Explicitly authorize one fresh paid attempt after invalid/uncertain Tutor output")
+    def requests(raw_args, **kwargs):
+        try:
+            authenticated_settings()
+            return library_search({"query": " "})
+        except Exception as error:
+            return json.dumps({"error_type": type(error).__name__})
+    ctx.register_command("valren-requests", handler=requests,
+                         description="Read pending research targets and IDs; no approval or paid work")
+    ctx.register_command("valren-approve", handler=approve_command,
+                         description="Human approval: exact request ID and target, then execute that fixed request")

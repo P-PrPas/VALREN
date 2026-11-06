@@ -26,10 +26,12 @@ def safe_display(value):
     return re.sub(r"https?://\S+", "[link removed]", str(value)).replace("@", "＠").replace("`", "'").replace("<", "‹").replace(">", "›")
 
 
-def digest_text(day, entries, budget_warning=False):
+def digest_text(day, entries, budget_warning=False, source_warning=None):
     lines = [f"VARLEN · {day}"]
     if budget_warning:
         lines.append("งบ LLM ใช้ถึง 80% แล้ว — ตรวจงบก่อน deep-dive เพิ่ม")
+    if source_warning:
+        lines.append("ข้อมูล/การประมวลผลบางส่วนยังไม่ครบ: " + safe_display(source_warning)[:150])
     if len(entries) > 3:
         raise ValueError("MVP digest supports at most 3 daily items")
     available = 1900 - len("\n".join(lines)) - sum(len(entry["url"]) + 20 for entry in entries)
@@ -59,7 +61,7 @@ def deliver(settings, store, http=None, at=None):
     local_day = (at or datetime.now(ZoneInfo(settings.timezone))).astimezone(ZoneInfo(settings.timezone)).date()
     store.db.execute("UPDATE deliveries SET state='expired' WHERE state='ready' AND day<?", ((local_day - timedelta(days=1)).isoformat(),))
     sent = 0
-    rows = store.db.execute("SELECT * FROM deliveries WHERE state='ready' AND attempts<3 ORDER BY day LIMIT 1").fetchall()
+    rows = store.db.execute("SELECT * FROM deliveries WHERE state='ready' AND attempts<3 ORDER BY day DESC LIMIT 1").fetchall()
     for row in rows:
         day_key = "discord-day:" + local_day.isoformat()
         previous = store.get_state(day_key)
@@ -77,5 +79,6 @@ def deliver(settings, store, http=None, at=None):
                 store.db.execute("UPDATE deliveries SET state=?,updated=? WHERE id=?", (state, now(), row["id"]))
             continue
         store.db.execute("UPDATE deliveries SET state='sent',receipt=?,updated=? WHERE id=?", (str(data["id"]), now(), row["id"]))
+        store.db.execute("UPDATE deliveries SET state='superseded',updated=? WHERE state='ready' AND day<?", (now(), row["day"]))
         sent += 1
     return {"sent": sent, "uncertain": store.db.execute("SELECT count(*) FROM deliveries WHERE state='uncertain'").fetchone()[0]}

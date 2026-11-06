@@ -32,9 +32,11 @@ class Telegram:
             raise RemoteError(status, uncertain=status >= 500)
         return data["result"]
 
-    def send(self, update_id, chat, body):
+    def send(self, update_id, chat, body, reply_markup=None):
         state_key = f"telegram-reply:{update_id}"
-        saved = self.store.get_state(state_key, {"parts": [], "chat": chat, "body": body, "state": "ready"})
+        saved = self.store.get_state(state_key, {"parts": [], "chat": chat, "body": body, "state": "ready", "reply_markup": reply_markup})
+        if chat not in self.settings.telegram.get("chat_ids", []):
+            saved["state"] = "failed"  # Revoked destinations must not drain from an old outbox.
         self.store.set_state(state_key, saved)
         if saved["state"] in ("sent", "uncertain", "failed"):
             return saved["state"]
@@ -50,8 +52,10 @@ class Telegram:
             saved["parts"].append("uncertain")
             self.store.set_state(state_key, saved)
             try:
-                receipt = self.request("sendMessage", {"chat_id": chat, "text": part,
-                    "link_preview_options": {"is_disabled": True}})
+                payload = {"chat_id": chat, "text": part, "link_preview_options": {"is_disabled": True}}
+                if index == len(parts) - 1 and saved.get("reply_markup"):
+                    payload["reply_markup"] = saved["reply_markup"]
+                receipt = self.request("sendMessage", payload)
             except RemoteError as error:
                 saved["state"] = "uncertain" if error.uncertain else "ready" if error.status == 429 else "failed"
                 if saved["state"] == "ready":
@@ -64,20 +68,34 @@ class Telegram:
         self.store.set_state(state_key, saved)
         return "sent"
 
-    def poll_once(self, handler):
+    def drain(self):
+        """Send durable replies/notices only; never consume the gateway's updates."""
         if quiet(self.settings):
-            return {"deferred": "quiet-hours", "handled": 0}
+            return {"deferred": "quiet-hours", "sent": 0}
+        counts = {}
         pending = self.store.db.execute("SELECT key,value FROM state WHERE key LIKE 'telegram-reply:%'").fetchall()
         for row in pending:
             reply = json.loads(row["value"])
             if reply.get("state") == "ready":
-                self.send(row["key"].split(":", 1)[1], reply["chat"], reply["body"])
+                result = self.send(row["key"].split(":", 1)[1], reply["chat"], reply["body"], reply.get("reply_markup"))
+                counts[result] = counts.get(result, 0) + 1
+                if result in ("ready", "deferred"):
+                    break  # Respect rate limiting/quiet-hours before the next service cycle.
+        return counts
+
+    def poll_once(self, handler, callback_handler=None):
+        if quiet(self.settings):
+            return {"deferred": "quiet-hours", "handled": 0}
+        self.drain()
         offset = self.store.get_state("telegram_offset", 0)
-        updates = self.request("getUpdates", {"offset": offset, "timeout": 25, "limit": 10, "allowed_updates": ["message"]})
+        updates = self.request("getUpdates", {"offset": offset, "timeout": 25, "limit": 10, "allowed_updates": ["message", "callback_query"]})
         handled = 0
         for update in updates:
             identifier = update["update_id"]
+            callback = update.get("callback_query")
             message = update.get("message", {})
+            if callback:
+                message = {"from": callback.get("from", {}), "chat": callback.get("message", {}).get("chat", {}), "text": "callback"}
             if authorized(self.settings, message) and isinstance(message.get("text"), str):
                 key = f"telegram-command:{identifier}"
                 saved = self.store.get_state(key)
@@ -85,13 +103,23 @@ class Telegram:
                     # Claim before invoking paid work; process death requires operator inspection.
                     self.store.set_state(key, {"state": "uncertain"})
                     try:
-                        response = handler(message["text"], identifier)
+                        if callback:
+                            response = callback_handler(callback) if callback_handler else "ไม่รองรับปุ่มนี้"
+                        else:
+                            response = handler(message["text"], identifier, message)
                     except Exception as error:
                         response = "คำขอยังไม่สำเร็จ: " + type(error).__name__ + " — ตรวจ health หรือสั่งซ้ำหลังแก้สาเหตุ"
                     saved = {"state": "done", "response": response}
                     self.store.set_state(key, saved)
                 if saved["state"] == "done":
-                    self.send(identifier, message["chat"]["id"], saved["response"])
+                    response = saved["response"]
+                    self.send(identifier, message["chat"]["id"], response["text"] if isinstance(response, dict) else response,
+                              response.get("reply_markup") if isinstance(response, dict) else None)
+                if callback:
+                    try:
+                        self.request("answerCallbackQuery", {"callback_query_id": callback["id"]})
+                    except RemoteError:
+                        pass
                 handled += 1
             self.store.set_state("telegram_offset", identifier + 1)
         return {"handled": handled}

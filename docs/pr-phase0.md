@@ -9,7 +9,7 @@ CLI → validated TOML → canonical candidates → SQLite
 ## Evidence
 
 - **Before:** repository had no executable worker or tests.
-  **After:** `PYTHONPATH=src python3 -m unittest discover -v` passes 6 tests covering version IDs, reused rename aliases, backup/restore, configuration boundaries, preserved user state and side-effect-free dry-run. `doctor` reports offline readiness, not live readiness.
+  **After:** `PYTHONPATH=src python3 -m unittest discover -v` passes 7 tests covering version IDs, reused rename aliases, backup/restore, configuration boundaries, preserved user state and side-effect-free dry-run. `doctor` reports offline readiness, not live readiness.
 
 ## Merge Danger
 

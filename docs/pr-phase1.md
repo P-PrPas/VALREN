@@ -10,7 +10,7 @@ arXiv / GitHub / HF / configured official feeds
 ## Evidence
 
 - **Before:** Radar accepted only local fixtures.
-  **After:** `PYTHONPATH=src python3 -m unittest discover -v` passes 11 tests, including XML rejection, source outage isolation, private-IP blocking, feed link filtering, repeated ingest and uncertain Notion creation reconciliation.
+  **After:** phase-1 branch `PYTHONPATH=src python3 -m unittest discover -v` passes 17 tests, including XML rejection, source outage isolation, private-IP blocking, feed link filtering, repeated ingest, lock contention and definite/uncertain Notion creation reconciliation. Both Claude review rounds are recorded in reviews.md.
 - Live public-source smoke result is recorded separately in validation notes. No Notion credentials were supplied; API payload tests do not establish live integration readiness.
 
 ## Merge Danger
@@ -19,4 +19,4 @@ arXiv / GitHub / HF / configured official feeds
 
 **Blast Radius:** isolated
 
-Stacked on PR #1 (`phase/0-foundation`). Notion writes require explicit `--sync-notion`; dry-run uses an isolated in-memory store. Sources are bounded discovery, not exhaustive Trending coverage. Configure official frontier feeds before frontier discovery is active. Continuous multi-day validation remains an operator gate.
+Stacked on PR #1 (`phase/0-foundation`). Notion writes require explicit `--sync-notion`; dry-run uses an isolated in-memory store. Sources are bounded discovery, not exhaustive Trending coverage. The official OpenAI feed is configured and live-verified; add other publishers explicitly. Continuous multi-day validation remains an operator gate.

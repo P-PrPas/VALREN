@@ -10,6 +10,9 @@ from valren.llm import Budget, BudgetExceeded, LLM, summary, rank, prune_cache
 from valren.models import Candidate
 from valren.recommend import recommend
 from valren.store import Store, now
+from contextlib import closing
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 
 def paid_settings(**extra):
@@ -20,6 +23,33 @@ def paid_settings(**extra):
 
 
 class RecommendationTests(unittest.TestCase):
+    def test_old_ready_or_uncertain_digest_does_not_block_fresh_day(self):
+        settings = paid_settings()
+        at = datetime.now(ZoneInfo(settings.timezone)).replace(hour=8, minute=0, second=0, microsecond=0)
+        yesterday = (at.date() - timedelta(days=1)).isoformat()
+        for old_state in ("ready", "uncertain"):
+            with self.subTest(old_state=old_state), closing(Store(":memory:")) as store:
+                init_outbox(store)
+                store.db.execute("INSERT INTO deliveries(id,day,payload,state,updated) VALUES(?,?,?,?,?)",
+                    ("old", yesterday, json.dumps({"content": "old"}), old_state, now()))
+                item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b", text="actual source")
+                store.add(item)
+                llm = MagicMock()
+                llm.budget.used.return_value = 0
+                llm.complete.side_effect = [{"items": [{"key": item.key, "score": 5, "reason": "AI"}]},
+                    {"summary": "สรุป", "why": "เกี่ยวข้อง", "limitations": "metadata only", "tags": [],
+                     "evidence": [{"source_id": item.key, "quote": "actual source"}]}]
+                result = recommend(settings, store, llm, MagicMock(), "AI")
+                self.assertEqual(result["selected"], 1)
+                client = MagicMock()
+                client.json.return_value = ({"id": "123"}, {})
+                with patch.dict("os.environ", {"DISCORD_WEBHOOK_URL": "https://discord.com/api/webhooks/1/test"}):
+                    delivered = deliver(settings, store, client, at)
+                self.assertEqual(delivered["sent"], 1)
+                self.assertIn("สรุป", client.json.call_args.kwargs["payload"]["content"])
+                state = store.db.execute("SELECT state FROM deliveries WHERE id='old'").fetchone()[0]
+                self.assertEqual(state, "superseded" if old_state == "ready" else "uncertain")
+
     def setUp(self):
         self.store = Store(":memory:")
         self.addCleanup(self.store.close)

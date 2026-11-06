@@ -9,6 +9,10 @@ from .sources import Sources
 from .store import now
 
 
+class WorkerBusy(ValueError):
+    pass
+
+
 @contextmanager
 def worker_lock(path):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -16,7 +20,7 @@ def worker_lock(path):
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise ValueError("another worker owns this database") from None
+            raise WorkerBusy("another worker owns this database") from None
         try:
             yield
         finally:

@@ -1,5 +1,23 @@
 name: valren
 services:
+  scheduler:
+    extends:
+      service: worker
+    profiles: [automation]
+    command: [schedule, --sync-notion, --enable-paid, --enable-delivery]
+    restart: unless-stopped
+  notices:
+    extends:
+      service: worker
+    profiles: [notices]
+    command: [telegram-notify-serve]
+    restart: unless-stopped
+  telegram:
+    extends:
+      service: worker
+    profiles: [telegram]
+    command: [telegram-serve]
+    restart: unless-stopped
   worker:
     build: .
     init: true

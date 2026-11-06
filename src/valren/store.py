@@ -14,7 +14,7 @@ def now() -> str:
 class Store:
     def __init__(self, path: Path | str):
         if str(path) != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(path, timeout=10, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         if self.db.execute("PRAGMA user_version").fetchone()[0] > 1:

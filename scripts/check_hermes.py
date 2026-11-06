@@ -25,7 +25,7 @@ for platform in ('cli', 'telegram'):
     assert names == ['valren_library_search'], (platform, enabled, names)
     print(json.dumps({'platform': platform, 'model_tools': names}))
 
-for name in ('valren-tutor', 'valren-tutor-retry'):
+for name in ('valren-tutor', 'valren-tutor-retry', 'valren-requests', 'valren-approve'):
     assert get_plugin_command_handler(name), name
 
 @contextmanager
@@ -43,9 +43,9 @@ runner = SimpleNamespace(_draining=False, config=GatewayConfig(),
     _session_env_scope=bound, _run_in_executor_with_context=asyncio.to_thread)
 settings = Settings(telegram={'user_ids': [123], 'chat_ids': [456]})
 
-async def dispatch(user, chat, command='valren_tutor'):
+async def dispatch(user, chat, command='valren_tutor', args='arxiv:2401.12345'):
     source = SessionSource(platform=Platform.TELEGRAM, user_id=str(user), chat_id=str(chat))
-    event = SimpleNamespace(get_command_args=lambda: 'arxiv:2401.12345')
+    event = SimpleNamespace(get_command_args=lambda: args)
     return await GatewayInboundMixin._hm_dispatch_quick_and_plugin_commands(runner, event, source, command)
 
 with patch('valren.config.load', return_value=settings), patch('subprocess.run') as run:
@@ -60,5 +60,19 @@ with patch('valren.config.load', return_value=settings), patch('subprocess.run')
     with patch.dict('os.environ', {'HERMES_SESSION_PLATFORM': 'telegram',
             'HERMES_SESSION_USER_ID': '123', 'HERMES_SESSION_CHAT_ID': '456'}):
         assert 'ValueError' in get_plugin_command_handler('valren-tutor')('arxiv:2401.12345')
+    assert run.call_count == 1
+with patch('valren.config.load', return_value=settings), patch('subprocess.run') as run:
+    run.side_effect = [SimpleNamespace(stdout=json.dumps({'state': 'approved'})),
+        SimpleNamespace(stdout=json.dumps({'lesson': 'approved lesson'}))]
+    args = 'Malren/request-0000000001 arxiv:2401.12345'
+    assert asyncio.run(dispatch(123, 456, 'valren_approve', args))[1] == 'approved lesson'
+    assert run.call_args_list[0].args[0][-4:] == ['approve-request', '--', 'Malren/request-0000000001', 'arxiv:2401.12345']
+    assert run.call_args_list[1].args[0][-3:] == ['run-approved', '--', 'Malren/request-0000000001']
+    run.reset_mock(side_effect=True)
+    run.return_value = SimpleNamespace(stdout=json.dumps({'error_type': 'ValueError'}))
+    assert 'ValueError' in asyncio.run(dispatch(123, 456, 'valren_approve', args))[1]
+    assert run.call_count == 1  # Rejected target must not execute.
+    for command in ('valren_approve', 'valren_requests'):
+        assert 'ValueError' in asyncio.run(dispatch(999, 456, command, args))[1]
     assert run.call_count == 1
 print(json.dumps({'gateway_dispatch': 'pass', 'unauthorized_and_env_spoof': 'blocked', 'network': 'none'}))

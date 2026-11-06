@@ -6,6 +6,9 @@ platform_toolsets:
   slack: []
   api: []
 mcp_servers: {}
+tools:
+  tool_search:
+    enabled: "off"
 agent:
   disabled_toolsets:
     - terminal
@@ -25,6 +28,4 @@ agent:
     - tts
     - vision
 plugins:
-  entries:
-    valren-research:
-      enabled: true
+  enabled: [valren-research]

@@ -209,7 +209,7 @@ def main(argv=None):
                 report = ingest(settings, store, items, health, notion)
                 emit(run_id=run_id, dry_run=dry, preview_scope="isolated" if dry else "local-ledger",
                      **report, items=[item.as_dict() for item in store.pending(settings.candidate_limit)])
-                return 0 if report["ok"] else 2  # Partial ingest remains usable by later stages.
+                return 0 if report["ok"] else 10  # Distinct from argparse's usage-error exit 2.
             finally:
                 store.close()
     except WorkerBusy:

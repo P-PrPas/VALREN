@@ -7,12 +7,14 @@ import tempfile
 from unittest.mock import MagicMock, patch
 import unittest
 
-from valren.agent_net import receive, approve, run_approved
+from valren.agent_net import receive, approve, run_approved, read_envelope
 from valren.config import Settings, local_path
 from valren.feedback import apply_taste, record_feedback, feedback_buttons, button_feedback
 from valren.models import Candidate
 from valren.scheduler import tick, control_path
 from valren.store import Store
+from valren.delivery import init_outbox
+import os
 
 
 class FeedbackRequestTests(unittest.TestCase):
@@ -89,7 +91,7 @@ class FeedbackRequestTests(unittest.TestCase):
     def test_scheduler_partial_radar_still_recommends_and_delivers(self):
         with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
             db = str(Path(directory)/"test.sqlite3")
-            runner = MagicMock(side_effect=[MagicMock(returncode=code) for code in (2, 0, 0)])
+            runner = MagicMock(side_effect=[MagicMock(returncode=code) for code in (10, 0, 0)])
             settings = Settings(monthly_budget_usd=1, interests={"confirmed": True})
             result = tick(settings, db, paid=True, sending=True, sync=True, runner=runner, at=self.at)
             self.assertEqual(result["state"], "done")
@@ -115,6 +117,31 @@ class FeedbackRequestTests(unittest.TestCase):
             self.assertEqual(busy["attempts"], 0)
             recovered = tick(Settings(), db, runner=runner, at=self.at + timedelta(minutes=6))
             self.assertEqual((recovered["state"], recovered["attempts"]), ("done", 1))
+
+    def test_delivery_only_retry_has_separate_attempt_counter(self):
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            path = Path(directory)/"test.sqlite3"
+            store = Store(path)
+            init_outbox(store)
+            store.db.execute("INSERT INTO deliveries(id,day,payload,state,updated) VALUES('ready','2026-11-06','{}','ready','2026-11-06')")
+            store.close()
+            runner = MagicMock(return_value=MagicMock(returncode=0))
+            tick(Settings(), str(path), sending=True, runner=runner, at=self.at)
+            second = tick(Settings(), str(path), sending=True, runner=runner, at=self.at + timedelta(hours=1))
+            self.assertEqual(second["attempts"], 1)
+            self.assertEqual(runner.call_count, 3)
+            self.assertEqual(runner.call_args.args[0][-1], "retry-deliveries")
+
+    def test_envelope_reader_rejects_nonregular_and_oversized_files(self):
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            path = Path(directory)/"envelope"
+            path.write_bytes(b"x" * 16001)
+            with self.assertRaises(ValueError):
+                read_envelope(path)
+            path.unlink()
+            os.mkfifo(path)
+            with self.assertRaises(ValueError):
+                read_envelope(path)
 
     def test_stale_executing_requires_target_confirmation_and_can_recover(self):
         envelope = self.envelope()

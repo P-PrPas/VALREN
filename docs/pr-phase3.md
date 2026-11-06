@@ -11,7 +11,7 @@ authorized user command → existing item / arXiv paper
 ## Evidence
 
 - **Before:** no Tutor, Telegram command or Hermes adapter.
-  **After:** 34 unittest checks cover authorization, honest abstract fallback, paid-work reuse after persistence failure, deferred/uncertain Telegram replies and plugin tool boundaries. `docker compose config --quiet` passes.
+  **After:** phase-3 branch has 39 passing unittest checks covering authorization, honest abstract fallback, old-style arXiv IDs, stable snapshots, bounded explicit retry, weekly-slot release, persistence failures, deferred/uncertain Telegram replies and plugin boundaries. `docker compose config --quiet` passes. Both Claude review rounds are recorded in reviews.md.
 - Isolated, network-disabled, read-only container using the installed Hermes image digest passed Plugin Doctor manifest/import/registration. No real LLM, bot or Library credentials used; live gateway authentication remains an operator gate.
 
 ## Merge Danger

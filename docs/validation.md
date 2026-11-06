@@ -21,6 +21,21 @@
 
 ## Phase 3
 
-- 34 local unittest checks; Compose syntax validates.
+- 39 local unittest checks after final review fixes; Compose syntax validates.
 - Hermes plugin import/registration verified by Plugin Doctor in the installed pinned image, without network/secrets and with checkout mounted read-only. This is a disposable validation container, not an active agent.
 - Host memory measured: 1,151 MiB available, swap 4,076/4,095 MiB used. Persistent deployment is deferred until capacity is addressed.
+
+## Phase 4 / final local verification
+
+- 53 unittest checks pass under local Python 3.14; final checks include scheduler partial/fatal separation, stale leases, busy retry, delivery counters, exact-target single-use approvals, late authenticated status replay, request rate limit, foreign-chat callbacks, envelope size/FIFO rejection and fresh digest priority over ready/uncertain backlog.
+- `docker compose config --quiet` passes. GitHub Actions has passed Python 3.12/3.14 unit tests and the worker-container build/doctor smoke on pre-final-fix commits; final commit checks are tracked on each PR.
+- Latest post-fix public-source dry-run on 6 Nov: arXiv fetched 100; GitHub fetched 96; 185 unique candidates preserved; Hugging Face returned RemoteError so the run was explicitly partial (exit 10). No Notion writes, LLM calls or messages. HF had succeeded in the earlier smoke; current reachability/quota still needs operator validation. No frontier feed is configured, so only its parser is fixture-verified.
+- All changes and runtime smoke artifacts are confined to valren. No persistent agent, bot, local scheduler or T3 recurring task was started. Remote main is initialization only; five stacked PRs await owner review.
+
+## Remaining live acceptance gates
+
+- Create/share the isolated Library and flat Interest Profile with separate writer/reader integrations; run live schema/permission tests, including an explicitly unshared fixture page.
+- Confirm real interests, model/provider compatibility/prices, monthly budget, bot/chat identity and official frontier feeds. Current defaults intentionally reject paid use.
+- Exercise Notion create/update/reconcile, Discord receipt/429/uncertain behavior and authorized/unauthorized Telegram identities with real dedicated credentials. Verify pinned Hermes runtime tool inventory and adapter-to-command identity before gateway use.
+- Provision the chosen agent request transport, individual signing keys and Malren's own read-only Library credential; existing agents/root config are untouched. Hermes-mode proactive request notices need a trusted gateway adapter or manual /valren_requests.
+- Complete at least a three-day Radar pilot, seven-day digest quality pilot, real peak-memory measurements and an operator backup/restore drill including worker, scheduler and .hermes state. The existing central restic job has not been changed because it is outside valren.

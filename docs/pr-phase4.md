@@ -11,7 +11,7 @@ local scheduler → daily claim → resumable stages → bounded retries
 ## Evidence
 
 - **Before:** no taste learning, buttons, signed request inbox or daily service.
-  **After:** 43 offline tests pass, including preference effects, chat-bound feedback buttons, HMAC tampering/replay/operation scope, expiring single-use approval, and scheduler day deduplication. Compose config validates; `schedule --once` waits outside its configured window without network or paid calls.
+  **After:** 53 offline tests pass, including preference effects, chat-bound buttons, HMAC tampering/late replay/operation scope, exact-target expiring approval, scheduler partial progression/stale leases/busy retry, and fresh digest priority. Compose config validates. Both Claude review rounds and final fixes are recorded in reviews.md.
 - Container smoke job is added to CI. No live bots, integration credentials or persistent containers were started.
 
 ## Merge Danger

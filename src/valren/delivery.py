@@ -61,7 +61,7 @@ def deliver(settings, store, http=None, at=None):
     local_day = (at or datetime.now(ZoneInfo(settings.timezone))).astimezone(ZoneInfo(settings.timezone)).date()
     store.db.execute("UPDATE deliveries SET state='expired' WHERE state='ready' AND day<?", ((local_day - timedelta(days=1)).isoformat(),))
     sent = 0
-    rows = store.db.execute("SELECT * FROM deliveries WHERE state='ready' AND attempts<3 ORDER BY day LIMIT 1").fetchall()
+    rows = store.db.execute("SELECT * FROM deliveries WHERE state='ready' AND attempts<3 ORDER BY day DESC LIMIT 1").fetchall()
     for row in rows:
         day_key = "discord-day:" + local_day.isoformat()
         previous = store.get_state(day_key)
@@ -79,5 +79,6 @@ def deliver(settings, store, http=None, at=None):
                 store.db.execute("UPDATE deliveries SET state=?,updated=? WHERE id=?", (state, now(), row["id"]))
             continue
         store.db.execute("UPDATE deliveries SET state='sent',receipt=?,updated=? WHERE id=?", (str(data["id"]), now(), row["id"]))
+        store.db.execute("UPDATE deliveries SET state='superseded',updated=? WHERE state='ready' AND day<?", (now(), row["day"]))
         sent += 1
     return {"sent": sent, "uncertain": store.db.execute("SELECT count(*) FROM deliveries WHERE state='uncertain'").fetchone()[0]}

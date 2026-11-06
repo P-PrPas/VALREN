@@ -18,9 +18,13 @@ def library_search(args, **kwargs):
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
             rows = db.execute("SELECT key,payload,status FROM items WHERE instr(lower(payload),lower(?))>0 LIMIT 10", (query,)).fetchall()
             memory = db.execute("SELECT value FROM state WHERE key='taste_memory'").fetchone()
+            pending = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='requests'").fetchone():
+                pending = [{"id": row[0], "agent": row[1], "target": row[2], "state": row[3], "expires": row[4]}
+                    for row in db.execute("SELECT id,agent,target,state,expires FROM requests WHERE state IN ('pending','failed','executing') ORDER BY created DESC LIMIT 10")]
         return json.dumps({"results": [{"key": row[0], "title": json.loads(row[1])["title"],
             "url": json.loads(row[1])["url"], "status": row[2]} for row in rows],
-            "taste_memory": json.loads(memory[0]) if memory else ""}, ensure_ascii=False)
+            "taste_memory": json.loads(memory[0]) if memory else "", "pending_requests": pending}, ensure_ascii=False)
     except Exception as error:
         return json.dumps({"error_type": type(error).__name__})
 
@@ -59,3 +63,5 @@ def register(ctx):
         return tutor_command(raw_args, retry_invalid=True, **kwargs)
     ctx.register_command("valren_tutor_retry", handler=retry,
                          description="Explicitly authorize one fresh paid attempt after invalid/uncertain Tutor output")
+    ctx.register_command("valren_requests", handler=lambda raw_args, **kwargs: library_search({"query": " "}),
+                         description="Read pending research targets and IDs; no approval or paid work")

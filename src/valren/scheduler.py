@@ -64,17 +64,19 @@ def tick(settings, db_path, config_path=None, *, paid=False, sending=False, sync
                 return {"state": "running", "attempts": saved["attempts"]}
             saved["state"] = "failed"  # Dead parent/child lease expired; paid work remains idempotent/held.
             store.set_state(state_key, saved)
-        if saved["state"] == "done" and (not sending or not pending_delivery(path)):
+        delivery_only = saved["state"] == "done" or saved.get("delivery_only", False)
+        if delivery_only and (not sending or not pending_delivery(path)):
             return {"state": "done", "attempts": saved["attempts"]}
-        if saved["attempts"] >= 3:
+        if delivery_only and saved.get("delivery_attempts", 0) >= 3:
+            return {"state": "done", "attempts": saved["attempts"], "delivery_attempts": saved["delivery_attempts"]}
+        if not delivery_only and saved["attempts"] >= 3:
             return {"state": saved["state"], "attempts": saved["attempts"]}
         if saved.get("retry_at") and datetime.fromisoformat(saved["retry_at"]) > clock:
             return {"state": "retry-later"}
-        if saved["state"] == "done":
-            if not sending or not pending_delivery(path):
-                return {"state": "done", "attempts": saved["attempts"]}
+        if delivery_only:
             saved["steps"] = [step for step in saved["steps"] if step != "deliver"]
-        saved.update(state="running", claimed_at=clock.isoformat(), attempts=saved["attempts"] + 1)
+        saved.update(state="running", claimed_at=clock.isoformat(), delivery_only=delivery_only,
+                     attempts=saved["attempts"] + (0 if delivery_only else 1))
         store.set_state(state_key, saved)
 
     base = [sys.executable, "-m", "valren.cli", "--db", str(path)]
@@ -85,24 +87,31 @@ def tick(settings, db_path, config_path=None, *, paid=False, sending=False, sync
         steps.append(("recommend", ["recommend"]))
     if sending:
         steps.append(("deliver", ["retry-deliveries"]))
+    if delivery_only:
+        steps = [("deliver", ["retry-deliveries"])]
     failed = False
     try:
         for name, command in steps:
             if name in saved["steps"]:
                 continue
             saved["claimed_at"] = current_time().isoformat()
+            if name == "deliver":
+                saved["delivery_attempts"] = saved.get("delivery_attempts", 0) + 1
             save(saved)
             result = runner(base + command, cwd=ROOT, env={**os.environ, "VALREN_HOME": str(ROOT)},
                             capture_output=True, text=True, timeout=3600, check=False)
             code = result.returncode
             if code == 75:
                 # Contention is not a failed research attempt; bookkeeping has its own lock/database.
-                saved["attempts"] -= 1
+                if not delivery_only:
+                    saved["attempts"] -= 1
+                if name == "deliver":
+                    saved["delivery_attempts"] -= 1
                 saved["retry_at"] = (current_time() + timedelta(minutes=5)).isoformat()
                 saved["error_step"] = name
                 failed = True
                 break
-            if code == 2 and name == "radar":
+            if code == 10 and name == "radar":
                 saved["partial_radar"] = True
             elif code:
                 saved["error_step"] = name

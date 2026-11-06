@@ -44,7 +44,7 @@ Each paid request is fingerprinted and durably claimed before network I/O. The r
 
 Here, cached raw response means decoded HTTP JSON before model-content parsing. Non-JSON HTTP responses remain uncertain and are not automatically repurchased. Cache pruning is intentionally manual until retention can preserve idempotency tombstones. Resumed work consumes today's digest slot/date; per-item Notion failures are recorded and omitted so they cannot pin all future runs.
 
-Discord sends at most one digest per local day. Ready digests older than yesterday expire; an ambiguous send occupies its daily slot until reconciled. Source URLs are the only displayed links. Managed provenance is appended as marked paragraphs; partial/uncertain appends require inspection rather than overwriting user notes.
+Discord sends at most one digest per local day, prioritizing the latest ready digest. Ready digests older than yesterday expire; after a new receipt, older ready digests become superseded and their knowledge remains in Library. Replacements are disclosed in the fresh digest. Ambiguous sends occupy their actual send day's slot until reconciled and do not block new research. Source URLs are the only displayed links. Managed provenance is appended as marked paragraphs; partial/uncertain appends require inspection rather than overwriting user notes.
 
 ## Recovery
 
@@ -53,6 +53,8 @@ Discord sends at most one digest per local day. Ready digests older than yesterd
 - Discord outbox: `ready` can be retried; `uncertain` requires checking the channel. Never retry uncertain sends blindly. After verifying, use `resolve-delivery ID --state sent --receipt MESSAGE_ID`, or `--state ready` only when definitely absent. This does not send immediately. `failed` and exhausted attempts require operator diagnosis.
 - A paid request with unknown usage retains its reservation, including timeouts. Inspect provider billing and usage rows before reconciliation; do not delete the database to reset a budget. `budget_blocked` is a manual reconciliation gate.
 - `backup data/backups/UNIQUE.sqlite3` creates a consistent SQLite backup into a new file. Include backups, `.hermes`, configuration and separately managed credentials in your existing protected backup process. Do not copy a live SQLite file without WAL consistency. Verify restore in a separate database under valren and run health/sync without sending. Pending/uncertain deliveries need reconciliation before resuming.
+
+Scheduler control state lives in `<worker-db>.scheduler`; back it up consistently as a separate SQLite database. `health` shows its recent leases/stages. Exit codes: 0 success/offline readiness, 1 fatal/config error, 2 argparse usage error, 10 partial Radar result (usable data preserved), 75 worker busy (safe to defer).
 
 All CLI errors emit only an error type and run ID, never response bodies or secrets. Check `health` for source failures, conflicts, outbox and usage. Do not paste secret-bearing endpoint URLs into logs or tickets.
 

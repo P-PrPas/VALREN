@@ -20,6 +20,7 @@ PYTHONPATH=src python3 -m unittest discover -v
 - [Feedback, agent requests และ scheduler](docs/agent-requests.md)
 - [ผลตรวจจริงและรายการที่ยังต้องทดสอบ](docs/validation.md)
 - [บันทึก review แต่ละ PR](docs/reviews.md)
+- [ลำดับรีวิวและ merge PR](docs/pr-stack.md)
 
 ใช้ `valren` เป็นชื่อ directory และ Python package; คงชื่อ persona `VARLEN` ตามเอกสารต้นทางจนกว่าจะตัดสินเรื่องชื่อ
 

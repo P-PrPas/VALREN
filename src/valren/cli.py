@@ -13,7 +13,7 @@ from .notion import Notion
 from .pipeline import ingest, worker_lock
 from .sources import Sources
 from .delivery import deliver, digest_text, init_outbox
-from .llm import LLM, Budget
+from .llm import LLM, Budget, prune_cache
 from .notion import read_profile
 from .recommend import recommend
 
@@ -40,6 +40,8 @@ def main(argv=None):
     rec.add_argument("--deliver", action="store_true")
     sub.add_parser("retry-deliveries")
     sub.add_parser("health")
+    prune = sub.add_parser("prune-llm-cache", help="drop old settled bodies, retain no-rebilling tombstones")
+    prune.add_argument("--older-than-days", type=int, default=30)
     preview = sub.add_parser("preview-digest", help="render supplied summaries without LLM/network")
     preview.add_argument("fixture", type=Path)
     resolution = sub.add_parser("resolve-delivery", help="operator action after checking remote delivery")
@@ -65,6 +67,10 @@ def main(argv=None):
         with nullcontext() if dry else worker_lock(path.with_suffix(".lock")):
             store = Store(":memory:" if dry else path)
             try:
+                if args.command == "prune-llm-cache":
+                    Budget(settings, store)
+                    emit(run_id=run_id, pruned=prune_cache(store, args.older_than_days))
+                    return 0
                 if args.command == "health":
                     init_outbox(store)
                     budget = Budget(settings, store)

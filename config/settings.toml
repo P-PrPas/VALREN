@@ -1,0 +1,21 @@
+timezone = "Asia/Bangkok"
+daily_limit = 3
+candidate_limit = 100
+lookback_days = 7
+monthly_budget_usd = 0.0
+notion_data_source_id = ""
+notion_profile_page_id = ""
+notion_version = "2026-03-11"
+
+[interests]
+# Example only: edit and explicitly enable before paid ranking.
+confirmed = false
+topics = ["AI agents", "LLM", "computer vision"]
+excluded = []
+
+[sources]
+arxiv_categories = ["cs.AI", "cs.LG", "cs.CV", "cs.CL"]
+github_topics = ["llm", "computer-vision", "ai-agents"]
+hf_tasks = ["text-generation", "image-classification"]
+# Explicitly configured primary-source RSS/Atom feeds, not arbitrary web search.
+frontier_feeds = []

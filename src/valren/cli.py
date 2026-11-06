@@ -12,6 +12,10 @@ from .store import Store
 from .notion import Notion
 from .pipeline import ingest, worker_lock
 from .sources import Sources
+from .delivery import deliver, digest_text, init_outbox
+from .llm import LLM, Budget, prune_cache
+from .notion import read_profile
+from .recommend import recommend
 
 
 def emit(**values):
@@ -32,10 +36,26 @@ def main(argv=None):
     sub.add_parser("sync-library")
     backup = sub.add_parser("backup")
     backup.add_argument("destination")
+    rec = sub.add_parser("recommend", help="paid ranking/summaries; requires explicit LLM config and confirmed profile")
+    rec.add_argument("--deliver", action="store_true")
+    sub.add_parser("retry-deliveries")
+    sub.add_parser("health")
+    prune = sub.add_parser("prune-llm-cache", help="drop old settled bodies, retain no-rebilling tombstones")
+    prune.add_argument("--older-than-days", type=int, default=30)
+    preview = sub.add_parser("preview-digest", help="render supplied summaries without LLM/network")
+    preview.add_argument("fixture", type=Path)
+    resolution = sub.add_parser("resolve-delivery", help="operator action after checking remote delivery")
+    resolution.add_argument("id")
+    resolution.add_argument("--state", choices=["sent", "ready", "failed"], required=True)
+    resolution.add_argument("--receipt", default="operator-confirmed")
     args = parser.parse_args(argv)
     run_id = str(uuid.uuid4())
     try:
         settings = load(args.config)
+        if args.command == "preview-digest":
+            entries = json.loads(local_path(str(args.fixture)).read_text())
+            emit(run_id=run_id, content=digest_text("preview", entries), dry_run=True)
+            return 0
         if args.command == "doctor":
             emit(run_id=run_id, ok=True, mode="offline", timezone=settings.timezone,
                  profile_confirmed=settings.interests.get("confirmed", False),
@@ -47,6 +67,39 @@ def main(argv=None):
         with nullcontext() if dry else worker_lock(path.with_suffix(".lock")):
             store = Store(":memory:" if dry else path)
             try:
+                if args.command == "prune-llm-cache":
+                    Budget(settings, store)
+                    emit(run_id=run_id, pruned=prune_cache(store, args.older_than_days))
+                    return 0
+                if args.command == "health":
+                    init_outbox(store)
+                    budget = Budget(settings, store)
+                    emit(run_id=run_id, last_run=store.get_state("last_run"), last_success=store.get_state("last_success"),
+                         library_conflicts=store.get_state("library_conflicts", []), budget_used_micros=budget.used(),
+                         budget_blocked=bool(store.get_state("budget_blocked")),
+                         llm_calls_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'llm-call:%' AND value LIKE '%\"inflight\"%'").fetchone()[0],
+                         deliveries=[dict(row) for row in store.db.execute("SELECT id,state,attempts,updated FROM deliveries")])
+                    return 0
+                if args.command == "recommend":
+                    profile = json.dumps(settings.interests, ensure_ascii=False)
+                    if settings.notion_profile_page_id:
+                        profile += "\n" + read_profile(settings)
+                    result = recommend(settings, store, LLM(settings, store), Notion(settings, store), profile)
+                    if args.deliver:
+                        result["delivery"] = deliver(settings, store)
+                    emit(run_id=run_id, **result)
+                    return 0
+                if args.command == "retry-deliveries":
+                    emit(run_id=run_id, **deliver(settings, store))
+                    return 0
+                if args.command == "resolve-delivery":
+                    init_outbox(store)
+                    changed = store.db.execute("UPDATE deliveries SET state=?,receipt=?,attempts=0 WHERE id=? AND state='uncertain'",
+                                               (args.state, args.receipt, args.id)).rowcount
+                    if not changed:
+                        raise ValueError("delivery is not uncertain")
+                    emit(run_id=run_id, resolved=True)
+                    return 0
                 if args.command == "sync-library":
                     notion = Notion(settings, store)
                     notion.validate()

@@ -19,4 +19,4 @@ arXiv / GitHub / HF / configured official feeds
 
 **Blast Radius:** isolated
 
-Stacked on PR #1 (`phase/0-foundation`). Notion writes require explicit `--sync-notion`; dry-run uses an isolated in-memory store. Sources are bounded discovery, not exhaustive Trending coverage. Configure official frontier feeds before frontier discovery is active. Continuous multi-day validation remains an operator gate.
+Stacked on PR #1 (`phase/0-foundation`). Notion writes require explicit `--sync-notion`; dry-run uses an isolated in-memory store. Sources are bounded discovery, not exhaustive Trending coverage. The official OpenAI feed is configured and live-verified; add other publishers explicitly. Continuous multi-day validation remains an operator gate.

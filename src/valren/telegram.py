@@ -35,6 +35,8 @@ class Telegram:
     def send(self, update_id, chat, body, reply_markup=None):
         state_key = f"telegram-reply:{update_id}"
         saved = self.store.get_state(state_key, {"parts": [], "chat": chat, "body": body, "state": "ready", "reply_markup": reply_markup})
+        if chat not in self.settings.telegram.get("chat_ids", []):
+            saved["state"] = "failed"  # Revoked destinations must not drain from an old outbox.
         self.store.set_state(state_key, saved)
         if saved["state"] in ("sent", "uncertain", "failed"):
             return saved["state"]
@@ -66,14 +68,25 @@ class Telegram:
         self.store.set_state(state_key, saved)
         return "sent"
 
-    def poll_once(self, handler, callback_handler=None):
+    def drain(self):
+        """Send durable replies/notices only; never consume the gateway's updates."""
         if quiet(self.settings):
-            return {"deferred": "quiet-hours", "handled": 0}
+            return {"deferred": "quiet-hours", "sent": 0}
+        counts = {}
         pending = self.store.db.execute("SELECT key,value FROM state WHERE key LIKE 'telegram-reply:%'").fetchall()
         for row in pending:
             reply = json.loads(row["value"])
             if reply.get("state") == "ready":
-                self.send(row["key"].split(":", 1)[1], reply["chat"], reply["body"], reply.get("reply_markup"))
+                result = self.send(row["key"].split(":", 1)[1], reply["chat"], reply["body"], reply.get("reply_markup"))
+                counts[result] = counts.get(result, 0) + 1
+                if result in ("ready", "deferred"):
+                    break  # Respect rate limiting/quiet-hours before the next service cycle.
+        return counts
+
+    def poll_once(self, handler, callback_handler=None):
+        if quiet(self.settings):
+            return {"deferred": "quiet-hours", "handled": 0}
+        self.drain()
         offset = self.store.get_state("telegram_offset", 0)
         updates = self.request("getUpdates", {"offset": offset, "timeout": 25, "limit": 10, "allowed_updates": ["message", "callback_query"]})
         handled = 0

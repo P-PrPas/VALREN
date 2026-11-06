@@ -59,3 +59,5 @@ Scheduler control state lives in `<worker-db>.scheduler`; back it up consistentl
 All CLI errors emit only an error type and run ID, never response bodies or secrets. Check `health` for source failures, conflicts, outbox and usage. Do not paste secret-bearing endpoint URLs into logs or tickets.
 
 API contract source: [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create). Model selection and prices remain explicit deployment choices.
+
+With Hermes inbound ownership, use `telegram-notify` (one outbound-only drain) or `telegram-notify-serve` (30-second cycles). Never run `telegram-serve` on that token at the same time. The notifier uses normal worker locks and will retry later on contention; pending ready destinations are checked against the current chat allowlist before send.

@@ -110,7 +110,8 @@ def receive(settings, store, envelope, at=None):
         if envelope["operation"] == "research":
             for chat in settings.telegram.get("chat_ids", []):
                 notification = "คำขอจาก " + envelope["agent"] + "\nเป้าหมาย: " + target + "\nหมดอายุ: " + (clock + timedelta(hours=24)).isoformat()
-                notification += "\nเริ่มงานที่มีค่าใช้จ่ายด้วย /approve " + scoped_id + " " + target
+                notification += "\nWorker: /approve " + scoped_id + " " + target
+                notification += "\nHermes: /valren_approve " + scoped_id + " " + target
                 store.set_state("telegram-reply:agent-request-" + hashlib.sha256((scoped_id + str(chat)).encode()).hexdigest()[:24],
                     {"parts": [], "chat": chat, "body": notification, "state": "ready"})
     return response

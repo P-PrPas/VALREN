@@ -25,3 +25,5 @@ PYTHONPATH=src python3 -m unittest discover -v
 ใช้ `valren` เป็นชื่อ directory และ Python package; คงชื่อ persona `VARLEN` ตามเอกสารต้นทางจนกว่าจะตัดสินเรื่องชื่อ
 
 ไฟล์โค้ด การตั้งค่า เอกสาร และข้อมูล runtime ของงานนี้ต้องอยู่ภายใน directory นี้ ห้าม mount หรืออ่าน secrets และ `.hermes` ของ agent อื่น การเชื่อมต่อบริการภายนอกและการ deploy ยังไม่ได้เกิดขึ้นจากขั้นวางแผนนี้
+
+Follow-up validation: all four public sources pass live dry-run; 58 offline tests plus `scripts/check-hermes.sh` pass. The latter verifies the pinned runtime tool inventory and synthetic authenticated command dispatch without network/credentials. See [validation](docs/validation.md) for remaining live setup gates.

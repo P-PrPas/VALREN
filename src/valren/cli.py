@@ -60,6 +60,8 @@ def main(argv=None):
     tutor.add_argument("--retry-invalid", action="store_true", help="explicitly allow one fresh paid attempt for invalid output")
     poll = sub.add_parser("telegram-poll", help="one authenticated Telegram polling cycle")
     poll.add_argument("--once", action="store_true", help="deprecated alias: each invocation is one bounded cycle")
+    sub.add_parser("telegram-notify", help="send queued notices only; safe alongside Hermes getUpdates")
+    sub.add_parser("telegram-notify-serve", help="drain outbound notices every 30 seconds without polling")
     sub.add_parser("telegram-serve", help="run the standalone bot loop; never alongside Hermes on the same token")
     feedback = sub.add_parser("feedback", help="trusted local user feedback")
     feedback.add_argument("key")
@@ -84,8 +86,9 @@ def main(argv=None):
         if args.command == "schedule":
             return serve(settings, args.db, args.config, once=args.once, paid=args.enable_paid,
                          sending=args.enable_delivery, sync=args.sync_notion)
-        if args.command == "telegram-serve":
-            command = ["--db", args.db] + (["--config", str(args.config)] if args.config else []) + ["telegram-poll"]
+        if args.command in ("telegram-serve", "telegram-notify-serve"):
+            cycle = "telegram-poll" if args.command == "telegram-serve" else "telegram-notify"
+            command = ["--db", args.db] + (["--config", str(args.config)] if args.config else []) + [cycle]
             while True:
                 main(command)
                 time.sleep(30)
@@ -104,6 +107,9 @@ def main(argv=None):
         with nullcontext() if dry else worker_lock(path.with_suffix(".lock")):
             store = Store(":memory:" if dry else path)
             try:
+                if args.command == "telegram-notify":
+                    emit(run_id=run_id, **Telegram(settings, store).drain())
+                    return 0
                 if args.command in ("tutor", "telegram-poll", "run-approved"):
                     def tutor_request(target, retry_invalid=False):
                         tutor_settings = replace(settings, llm=settings.tutor_llm or settings.llm)

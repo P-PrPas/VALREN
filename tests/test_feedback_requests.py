@@ -35,6 +35,25 @@ class FeedbackRequestTests(unittest.TestCase):
         with patch.dict("os.environ", {"VALREN_AGENT_NET_KEYS_JSON": json.dumps({"Malren": self.signing_key})}):
             return receive(self.settings, self.store, envelope, self.at)
 
+    @patch("valren.telegram.quiet", return_value=False)
+    def test_gateway_notices_send_without_consuming_updates(self, _quiet):
+        from valren.telegram import Telegram
+        from dataclasses import replace
+        self.settings = replace(self.settings, telegram={"user_ids": [1], "chat_ids": [2]})
+        self.receive(self.envelope())
+        http = MagicMock()
+        http.json.return_value = ({"ok": True, "result": {"message_id": 123}}, {})
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "123:test"}):
+            telegram = Telegram(self.settings, self.store, http)
+        self.assertEqual(telegram.drain(), {"sent": 1})
+        self.assertEqual(telegram.drain(), {})
+        self.assertEqual(http.json.call_count, 1)
+        self.assertTrue(http.json.call_args.args[1].endswith("/sendMessage"))
+        self.assertIn("/valren_approve", http.json.call_args.kwargs["payload"]["text"])
+        self.store.set_state("telegram-reply:revoked", {"parts": [], "chat": 999, "body": "private", "state": "ready"})
+        self.assertEqual(telegram.drain(), {"failed": 1})
+        self.assertEqual(http.json.call_count, 1)
+
     def test_signed_research_needs_single_use_expiring_user_approval(self):
         response = self.receive(self.envelope())
         self.assertEqual(response["state"], "pending_user_approval")

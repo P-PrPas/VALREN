@@ -28,7 +28,7 @@
 ## Phase 4 / final local verification
 
 - 53 unittest checks pass under local Python 3.14; final checks include scheduler partial/fatal separation, stale leases, busy retry, delivery counters, exact-target single-use approvals, late authenticated status replay, request rate limit, foreign-chat callbacks, envelope size/FIFO rejection and fresh digest priority over ready/uncertain backlog.
-- `docker compose config --quiet` passes. GitHub Actions has passed Python 3.12/3.14 unit tests and the worker-container build/doctor smoke on pre-final-fix commits; final commit checks are tracked on each PR.
+- `docker compose config --quiet` passes. All five PR heads passed GitHub Actions Python 3.12/3.14 checks. Implementation head `4d72fda` also passed the worker-container build/doctor smoke; the final documentation-only record may produce a newer head. Check the live PR checks for that exact head.
 - Latest post-fix public-source dry-run on 6 Nov: arXiv fetched 100; GitHub fetched 96; 185 unique candidates preserved; Hugging Face returned RemoteError so the run was explicitly partial (exit 10). No Notion writes, LLM calls or messages. HF had succeeded in the earlier smoke; current reachability/quota still needs operator validation. No frontier feed is configured, so only its parser is fixture-verified.
 - All changes and runtime smoke artifacts are confined to valren. No persistent agent, bot, local scheduler or T3 recurring task was started. Remote main is initialization only; five stacked PRs await owner review.
 

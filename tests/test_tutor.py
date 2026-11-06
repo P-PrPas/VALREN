@@ -13,6 +13,17 @@ from valren.tutor import source_chunks, teach
 
 
 class TutorTests(unittest.TestCase):
+    @patch("valren.telegram.quiet", return_value=False)
+    def test_foreign_chat_callback_cannot_reach_feedback_handler(self, _quiet):
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "123:test"}):
+            telegram = Telegram(self.settings, self.store, MagicMock())
+        updates = [{"update_id": 1, "callback_query": {"id": "x", "from": {"id": 1},
+            "message": {"chat": {"id": 99}}, "data": "fb:token:Liked"}}]
+        callback = MagicMock()
+        with patch.object(telegram, "request", return_value=updates), patch.object(telegram, "send") as send:
+            telegram.poll_once(MagicMock(), callback)
+            callback.assert_not_called()
+            send.assert_not_called()
     def valid_lesson(self, key):
         evidence = [{"source_id": key, "quote": "actual source"}]
         return {"overview": "ภาพรวม", "glossary": [{"term": "AI", "meaning": "ปัญญาประดิษฐ์"}],

@@ -15,6 +15,19 @@ import tempfile
 
 
 class RadarTests(unittest.TestCase):
+    def test_recommendation_does_not_overwrite_new_user_status(self):
+        store = Store(":memory:")
+        item = Candidate("github:1", "a/b", "Repo", "https://github.com/a/b")
+        store.add(item)
+        store.db.execute("UPDATE items SET page_id=?", ("a" * 32,))
+        with patch.dict("os.environ", {"NOTION_LIBRARY_TOKEN": "test"}):
+            client = Notion(Settings(notion_data_source_id="b" * 32), store, http=object())
+        page = {"parent": {"data_source_id": "b" * 32}, "properties": {"Status": {"select": {"name": "Reading"}}}}
+        with patch.object(client, "request", return_value=page) as request:
+            with self.assertRaises(ValueError):
+                client.patch_owned(item.key, {"Status": {"select": {"name": "Recommended"}}})
+            self.assertEqual(request.call_count, 1)
+        store.close()
     def test_lock_contention(self):
         with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
             path = Path(directory)/"worker.lock"

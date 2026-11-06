@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import hashlib
 from zoneinfo import ZoneInfo
@@ -18,6 +18,10 @@ def recommend(settings, store, llm, notion, profile):
     init_outbox(store)
     day = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
     job_key = "digest:" + day
+    yesterday = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
+    backlog = store.db.execute("SELECT day,state FROM deliveries WHERE state IN ('ready','uncertain') AND day>=? AND day<? LIMIT 1", (yesterday, day)).fetchone()
+    if backlog:
+        return {"day": backlog["day"], "state": backlog["state"], "resumed": True, "waiting_for_delivery": True}
     current_delivery = store.db.execute("SELECT id,state FROM deliveries WHERE day=? LIMIT 1", (day,)).fetchone()
     if current_delivery:
         return {"day": day, "state": current_delivery["state"], "resumed": True}
@@ -96,7 +100,10 @@ def recommend(settings, store, llm, notion, profile):
         store.set_state("tags:" + item.key, result["tags"])
         entries.append({"key": item.key, "title": item.title, "url": item.url, **result})
     warning = llm.budget.used() >= micros(settings.monthly_budget_usd) * .8
-    content = digest_text(day, entries, warning or work.get("budget_exhausted", False))
+    failed_sources = [name for name, value in store.get_state("last_run", {}).get("sources", {}).items() if not value.get("ok")]
+    if work.get("failed_batches") or any(row.get("summary_failed") or row.get("notion_failed") for row in work["entries"]):
+        failed_sources.append("คัดกรอง/บันทึกบางรายการ")
+    content = digest_text(day, entries, warning or work.get("budget_exhausted", False), ", ".join(failed_sources))
     store.db.execute("INSERT INTO deliveries(id,day,payload,state,updated) VALUES(?,?,?,'ready',?)",
         (job_key, day, json.dumps({"content": content, "entries": entries}, ensure_ascii=False), now()))
     return {"day": day, "state": "ready", "selected": len(entries), "budget_warning": warning,

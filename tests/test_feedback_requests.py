@@ -11,7 +11,7 @@ from valren.agent_net import receive, approve, run_approved
 from valren.config import Settings, local_path
 from valren.feedback import apply_taste, record_feedback, feedback_buttons, button_feedback
 from valren.models import Candidate
-from valren.scheduler import tick
+from valren.scheduler import tick, control_path
 from valren.store import Store
 
 
@@ -40,7 +40,7 @@ class FeedbackRequestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_approved(self.store, response["request_id"], handler, self.at)
         handler.assert_not_called()
-        approve(self.store, response["request_id"], "telegram:1", self.at)
+        approve(self.store, response["request_id"], "telegram:1", "arxiv:2401.12345", self.at)
         result = run_approved(self.store, response["request_id"], handler, self.at)
         self.assertEqual(result["key"], "arxiv:2401.12345")
         with self.assertRaises(ValueError):
@@ -56,7 +56,7 @@ class FeedbackRequestTests(unittest.TestCase):
         self.assertEqual(self.receive(self.envelope()), response)
         with self.assertRaises(ValueError):
             self.receive(self.envelope(operation="write_file", request_id="request-0000000002"))
-        approve(self.store, response["request_id"], "local-operator", self.at)
+        approve(self.store, response["request_id"], "local-operator", "arxiv:2401.12345", self.at)
         with self.assertRaises(ValueError):
             run_approved(self.store, response["request_id"], MagicMock(), self.at + timedelta(minutes=16))
 
@@ -85,3 +85,57 @@ class FeedbackRequestTests(unittest.TestCase):
             self.assertEqual(second["state"], "done")
             self.assertEqual(runner.call_count, 1)
             self.assertNotIn("recommend", runner.call_args.args[0])
+
+    def test_scheduler_partial_radar_still_recommends_and_delivers(self):
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            db = str(Path(directory)/"test.sqlite3")
+            runner = MagicMock(side_effect=[MagicMock(returncode=code) for code in (2, 0, 0)])
+            settings = Settings(monthly_budget_usd=1, interests={"confirmed": True})
+            result = tick(settings, db, paid=True, sending=True, sync=True, runner=runner, at=self.at)
+            self.assertEqual(result["state"], "done")
+            self.assertTrue(result["partial_radar"])
+            self.assertEqual(result["steps"], ["radar", "recommend", "deliver"])
+
+    def test_scheduler_runner_failure_and_stale_lease_recover(self):
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            path = Path(directory)/"test.sqlite3"
+            failed = tick(Settings(), str(path), runner=MagicMock(side_effect=OSError()), at=self.at)
+            self.assertEqual(failed["state"], "failed")
+            control = Store(control_path(path))
+            control.set_state("schedule:2026-11-06", {"state": "running", "attempts": 1, "steps": [], "claimed_at": self.at.isoformat()})
+            control.close()
+            recovered = tick(Settings(), str(path), runner=MagicMock(return_value=MagicMock(returncode=0)), at=self.at + timedelta(hours=2))
+            self.assertEqual((recovered["state"], recovered["attempts"]), ("done", 2))
+
+    def test_scheduler_busy_does_not_spend_attempt(self):
+        with tempfile.TemporaryDirectory(dir=local_path(".")) as directory:
+            db = str(Path(directory)/"test.sqlite3")
+            runner = MagicMock(side_effect=[MagicMock(returncode=75), MagicMock(returncode=0)])
+            busy = tick(Settings(), db, runner=runner, at=self.at)
+            self.assertEqual(busy["attempts"], 0)
+            recovered = tick(Settings(), db, runner=runner, at=self.at + timedelta(minutes=6))
+            self.assertEqual((recovered["state"], recovered["attempts"]), ("done", 1))
+
+    def test_stale_executing_requires_target_confirmation_and_can_recover(self):
+        envelope = self.envelope()
+        response = self.receive(envelope)
+        identifier = response["request_id"]
+        with self.assertRaises(ValueError):
+            approve(self.store, identifier, "local", "arxiv:2401.99999", self.at)
+        approve(self.store, identifier, "local", "arxiv:2401.12345", self.at)
+        with self.assertRaises(SystemExit):
+            run_approved(self.store, identifier, MagicMock(side_effect=SystemExit()), self.at)
+        with self.assertRaises(ValueError):
+            approve(self.store, identifier, "local", "arxiv:2401.12345", self.at + timedelta(minutes=1))
+        later = self.at + timedelta(hours=2)
+        approve(self.store, identifier, "local", "arxiv:2401.12345", later)
+        run_approved(self.store, identifier, lambda _: {"key": "arxiv:2401.12345"}, later)
+        with patch.dict("os.environ", {"VALREN_AGENT_NET_KEYS_JSON": json.dumps({"Malren": self.signing_key})}):
+            status = receive(self.settings, self.store, envelope, later)
+        self.assertEqual(status["state"], "complete")
+
+    def test_request_rate_limit_boundary(self):
+        for number in range(20):
+            self.receive(self.envelope(operation="search", target="AI", request_id=f"request-{number:016}"))
+        with self.assertRaises(ValueError):
+            self.receive(self.envelope(operation="search", target="AI", request_id="request-9999999999999999"))

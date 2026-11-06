@@ -99,7 +99,7 @@ class Notion:
                 uuid(page["id"])
                 if not self.store.db.execute("SELECT 1 FROM items WHERE key=?", (key,)).fetchone():
                     self.store.add(item)
-                self.store.db.execute("UPDATE items SET page_id=?,status=?,recommended=?,feedback=? WHERE key=?",
+                self.store.db.execute("UPDATE items SET page_id=?,status=?,recommended=coalesce(recommended,?),feedback=? WHERE key=?",
                                       (page["id"], status, date, feedback, key))
                 self.store.set_state("tags:" + key, [tag["name"] for tag in props.get("Tags", {}).get("multi_select", [])])
                 keys.add(key)
@@ -160,6 +160,13 @@ class Notion:
         parent = page.get("parent", {})
         if parent.get("data_source_id", "").replace("-", "") != self.source.replace("-", ""):
             raise ValueError("page outside Research Library")
+        properties = dict(properties)
+        if properties.get("Status", {}).get("select", {}).get("name") == "Recommended":
+            remote_status = (page.get("properties", {}).get("Status", {}).get("select") or {}).get("name")
+            if remote_status in ("Reading", "Deep-dived", "Skipped"):
+                raise ValueError("user advanced item status while research was running")
+            if page.get("properties", {}).get("Recommended on", {}).get("date"):
+                properties.pop("Recommended on", None)
         self.request("PATCH", "pages/" + uuid(row[0]), {"properties": properties})
 
     def save_managed(self, key, identifier, body):

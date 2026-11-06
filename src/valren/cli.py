@@ -10,7 +10,7 @@ from .config import load, local_path
 from .models import Candidate
 from .store import Store
 from .notion import Notion
-from .pipeline import ingest, worker_lock
+from .pipeline import ingest, worker_lock, WorkerBusy
 from .sources import Sources
 from .delivery import deliver, digest_text, init_outbox
 from .llm import LLM, Budget
@@ -21,8 +21,8 @@ from .telegram import Telegram
 from dataclasses import replace
 import time
 from .feedback import record_feedback, feedback_buttons, button_feedback, taste
-from .agent_net import receive, approve, run_approved, init_requests
-from .scheduler import serve
+from .agent_net import receive, approve, run_approved, init_requests, read_envelope
+from .scheduler import serve, status as scheduler_status
 
 
 def emit(**values):
@@ -66,6 +66,7 @@ def main(argv=None):
     agent.add_argument("envelope", type=Path)
     approval = sub.add_parser("approve-request", help="trusted local operator approval, not an agent tool")
     approval.add_argument("id")
+    approval.add_argument("target", help="must match the reviewed stored target")
     run = sub.add_parser("run-approved", help="consume one current user approval and run its fixed target")
     run.add_argument("id")
     sub.add_parser("requests")
@@ -122,8 +123,13 @@ def main(argv=None):
                             if command == "/feedback":
                                 return feedback_buttons(store, target.strip(), message["chat"]["id"])
                             if command == "/approve":
-                                approve(store, target.strip(), "telegram:" + str(message["from"]["id"]))
-                                return run_approved(store, target.strip(), tutor_request)["lesson"]
+                                identifier, _, reviewed_target = target.strip().partition(" ")
+                                approve(store, identifier, "telegram:" + str(message["from"]["id"]), reviewed_target.strip())
+                                return run_approved(store, identifier, tutor_request)["lesson"]
+                            if command == "/requests":
+                                init_requests(store)
+                                return json.dumps([dict(row) for row in store.db.execute(
+                                    "SELECT id,agent,target,state,expires FROM requests ORDER BY created DESC LIMIT 10")], ensure_ascii=False)
                             return "ใช้ /tutor ตามด้วย canonical ID หรือ https://arxiv.org/abs/ID เพื่อเริ่มบทเรียน"
                         emit(run_id=run_id, **Telegram(settings, store).poll_once(handler,
                             lambda query: button_feedback(store, Notion(settings, store), query)))
@@ -133,12 +139,10 @@ def main(argv=None):
                     return 0
                 if args.command == "agent-request":
                     path = local_path(str(args.envelope))
-                    if path.stat().st_size > 16000:
-                        raise ValueError("agent envelope too large")
-                    emit(run_id=run_id, **receive(settings, store, json.loads(path.read_text())))
+                    emit(run_id=run_id, **receive(settings, store, read_envelope(path)))
                     return 0
                 if args.command == "approve-request":
-                    emit(run_id=run_id, **approve(store, args.id, "local-operator"))
+                    emit(run_id=run_id, **approve(store, args.id, "local-operator", args.target))
                     return 0
                 if args.command == "requests":
                     init_requests(store)
@@ -155,6 +159,9 @@ def main(argv=None):
                          llm_calls_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'llm-call:%' AND value LIKE '%\"inflight\"%'").fetchone()[0],
                          telegram_commands_held=store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'telegram-command:%' AND value LIKE '%\"uncertain\"%'").fetchone()[0],
                          taste=taste(store), pending_requests=store.db.execute("SELECT count(*) FROM requests WHERE state='pending'").fetchone()[0],
+                         executing_requests=store.db.execute("SELECT count(*) FROM requests WHERE state='executing'").fetchone()[0],
+                         failed_requests=store.db.execute("SELECT count(*) FROM requests WHERE state='failed'").fetchone()[0],
+                         scheduler=scheduler_status(path),
                          deliveries=[dict(row) for row in store.db.execute("SELECT id,state,attempts,updated FROM deliveries")])
                     return 0
                 if args.command == "recommend":
@@ -202,9 +209,12 @@ def main(argv=None):
                 report = ingest(settings, store, items, health, notion)
                 emit(run_id=run_id, dry_run=dry, preview_scope="isolated" if dry else "local-ledger",
                      **report, items=[item.as_dict() for item in store.pending(settings.candidate_limit)])
-                return 0 if report["ok"] else 1
+                return 0 if report["ok"] else 2  # Partial ingest remains usable by later stages.
             finally:
                 store.close()
+    except WorkerBusy:
+        emit(run_id=run_id, ok=False, error_type="WorkerBusy")
+        return 75
     except Exception as error:
         # Do not echo remote payloads or secrets through unhandled tracebacks.
         emit(run_id=run_id, ok=False, error_type=type(error).__name__)

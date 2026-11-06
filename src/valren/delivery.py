@@ -26,10 +26,12 @@ def safe_display(value):
     return re.sub(r"https?://\S+", "[link removed]", str(value)).replace("@", "＠").replace("`", "'").replace("<", "‹").replace(">", "›")
 
 
-def digest_text(day, entries, budget_warning=False):
+def digest_text(day, entries, budget_warning=False, source_warning=None):
     lines = [f"VARLEN · {day}"]
     if budget_warning:
         lines.append("งบ LLM ใช้ถึง 80% แล้ว — ตรวจงบก่อน deep-dive เพิ่ม")
+    if source_warning:
+        lines.append("ข้อมูล/การประมวลผลบางส่วนยังไม่ครบ: " + safe_display(source_warning)[:150])
     if len(entries) > 3:
         raise ValueError("MVP digest supports at most 3 daily items")
     available = 1900 - len("\n".join(lines)) - sum(len(entry["url"]) + 20 for entry in entries)

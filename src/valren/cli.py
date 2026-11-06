@@ -4,10 +4,14 @@ from pathlib import Path
 import sys
 import sqlite3
 import uuid
+from contextlib import nullcontext
 
 from .config import load, local_path
 from .models import Candidate
 from .store import Store
+from .notion import Notion
+from .pipeline import ingest, worker_lock
+from .sources import Sources
 
 
 def emit(**values):
@@ -23,6 +27,11 @@ def main(argv=None):
     radar = sub.add_parser("radar")
     radar.add_argument("--dry-run", action="store_true")
     radar.add_argument("--fixture", type=Path)
+    radar.add_argument("--live", action="store_true", help="fetch public sources")
+    radar.add_argument("--sync-notion", action="store_true", help="write New items to Library")
+    sub.add_parser("sync-library")
+    backup = sub.add_parser("backup")
+    backup.add_argument("destination")
     args = parser.parse_args(argv)
     run_id = str(uuid.uuid4())
     try:
@@ -33,21 +42,40 @@ def main(argv=None):
                  budget_usd=settings.monthly_budget_usd,
                  live_verified=False)
             return 0
-        if not args.fixture:
-            raise ValueError("foundation radar requires --fixture")
-        items = [Candidate(**value) for value in json.loads(local_path(str(args.fixture)).read_text())]
-        store = Store(":memory:" if args.dry_run else local_path(args.db))
-        try:
-            added = sum(store.add(item) for item in items[:settings.candidate_limit])
-            emit(run_id=run_id, dry_run=args.dry_run, fetched=len(items), added=added,
-                 truncated=max(0, len(items) - settings.candidate_limit),
-                 duplicates=min(len(items), settings.candidate_limit) - added,
-                 preview_scope="fixture-only" if args.dry_run else "local-ledger",
-                 items=[item.as_dict() for item in store.pending(settings.candidate_limit)])
-        finally:
-            store.close()
-        return 0
-    except (ValueError, OSError, TypeError, KeyError, sqlite3.Error, RecursionError) as error:
+        dry = getattr(args, "dry_run", False)
+        path = local_path(args.db)
+        with nullcontext() if dry else worker_lock(path.with_suffix(".lock")):
+            store = Store(":memory:" if dry else path)
+            try:
+                if args.command == "sync-library":
+                    notion = Notion(settings, store)
+                    notion.validate()
+                    emit(run_id=run_id, synced=notion.sync())
+                    return 0
+                if args.command == "backup":
+                    destination = local_path(args.destination)
+                    if destination == path or destination.exists() or str(destination) in (str(path) + "-wal", str(path) + "-shm", str(path.with_suffix(".lock"))):
+                        raise ValueError("backup destination must be a new, separate file")
+                    store.backup(destination)
+                    emit(run_id=run_id, backed_up=True)
+                    return 0
+                if args.fixture and args.live:
+                    raise ValueError("choose fixture or live sources")
+                if args.fixture:
+                    items = [Candidate(**value) for value in json.loads(local_path(str(args.fixture)).read_text())]
+                    health = {}
+                elif args.live:
+                    items, health = Sources(settings).collect()
+                else:
+                    raise ValueError("radar requires --fixture or --live")
+                notion = Notion(settings, store) if args.sync_notion and not dry else None
+                report = ingest(settings, store, items, health, notion)
+                emit(run_id=run_id, dry_run=dry, preview_scope="isolated" if dry else "local-ledger",
+                     **report, items=[item.as_dict() for item in store.pending(settings.candidate_limit)])
+                return 0 if report["ok"] else 1
+            finally:
+                store.close()
+    except Exception as error:
         # Do not echo remote payloads or secrets through unhandled tracebacks.
         emit(run_id=run_id, ok=False, error_type=type(error).__name__)
         return 1

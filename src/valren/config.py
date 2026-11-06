@@ -56,7 +56,7 @@ class Settings:
                     valid = type(value) is kind
                 if kind is list and valid:
                     member_type = int if section == "telegram" else str
-                    valid = all(type(member) is member_type for member in value)
+                    valid = len(value) <= 20 and all(type(member) is member_type for member in value)
                 if not valid:
                     raise ValueError(f"invalid {section}.{key}")
         for value in (self.notion_data_source_id, self.notion_profile_page_id):

@@ -18,7 +18,7 @@ def canonical(source: str, identifier: str) -> str:
             raise ValueError("GitHub canonical ID requires numeric repository ID")
         value = str(int(value))
     elif source == "hf":
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", value) or ".." in value:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,95})?", value) or ".." in value:
             raise ValueError("invalid Hugging Face model ID")
     elif source == "frontier":
         parts = urlsplit(value)
